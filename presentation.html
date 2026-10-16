@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FaithTree Presentation</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: #000; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #fff; }
+  
+  .slide {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .slide.active { opacity: 1; z-index: 10; }
+  
+  .gradient-top, .gradient-bottom {
+    position: absolute;
+    left: 0; right: 0;
+    height: 35%;
+    pointer-events: none;
+  }
+  .gradient-top {
+    top: 0;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.4) 40%, transparent 100%);
+  }
+  .gradient-bottom {
+    bottom: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.4) 40%, transparent 100%);
+  }
+  
+  .bug {
+    position: absolute;
+    right: 48px;
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: dropBug 30s linear infinite;
+    z-index: 20;
+  }
+  .bug img {
+    width: 70%;
+    height: 70%;
+    object-fit: contain;
+  }
+  /* Fallback text logo if no image */
+  .bug .fallback {
+    font-weight: 700;
+    font-size: 28px;
+    color: #2c5f2d;
+    letter-spacing: -1px;
+  }
+  
+  @keyframes dropBug {
+    0%   { top: 40px; }
+    100% { top: calc(100% - 130px); }
+  }
+  
+  .content {
+    position: relative;
+    z-index: 15;
+    max-width: 900px;
+    width: 85%;
+    text-align: left;
+    padding: 40px 60px;
+    opacity: 0;
+    animation: fadeInContent 1.2s ease 0.8s forwards;
+  }
+  
+  .content h1 {
+    font-size: 3.2rem;
+    font-weight: 700;
+    line-height: 1.15;
+    margin-bottom: 1.5rem;
+    text-shadow: 0 2px 12px rgba(0,0,0,0.6);
+    letter-spacing: -0.5px;
+  }
+  .content ul {
+    list-style: none;
+    font-size: 1.55rem;
+    line-height: 1.6;
+  }
+  .content li {
+    margin-bottom: 0.7rem;
+    padding-left: 1.4rem;
+    position: relative;
+    text-shadow: 0 1px 6px rgba(0,0,0,0.5);
+  }
+  .content li::before {
+    content: "•";
+    position: absolute;
+    left: 0;
+    color: #a8d5a2;
+    font-weight: bold;
+  }
+  
+  @keyframes fadeInContent {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  
+  .controls {
+    position: fixed;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    display: flex;
+    gap: 12px;
+    opacity: 0.3;
+    transition: opacity 0.3s;
+  }
+  .controls:hover { opacity: 1; }
+  .controls button {
+    background: rgba(0,0,0,0.6);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.3);
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .controls button:hover { background: rgba(0,0,0,0.8); }
+  
+  .progress {
+    position: fixed;
+    top: 0; left: 0;
+    height: 3px;
+    background: #a8d5a2;
+    z-index: 50;
+    transition: width 0.3s;
+  }
+</style>
+</head>
+<body>
+  <div class="progress" id="progress"></div>
+  
+  <div class="slide" style="background-image: url('https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1920');">
+    <div class="gradient-top"></div>
+    <div class="gradient-bottom"></div>
+    <div class="bug">
+      <img src="logo.png" alt="FaithTree" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="fallback" style="display:none;">FT</div>
+    </div>
+    <div class="content">
+      <h1>Welcome to FaithTree</h1>
+      <ul>
+      <li>A ministry of young adults seeking Jesus together</li>
+      <li>Gathering for worship, prayer, and fellowship</li>
+      <li>Rooted in the Gospel across the St. Louis area</li>
+    </ul>
+    </div>
+  </div>
+
+  <div class="slide" style="background-image: url('https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=1920');">
+    <div class="gradient-top"></div>
+    <div class="gradient-bottom"></div>
+    <div class="bug">
+      <img src="logo.png" alt="FaithTree" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="fallback" style="display:none;">FT</div>
+    </div>
+    <div class="content">
+      <h1>What We Do</h1>
+      <ul>
+      <li>Sunset Services three times a month</li>
+      <li>Feasty Fridays with food and conversation</li>
+      <li>Prayer walks, film nights, and more</li>
+    </ul>
+    </div>
+  </div>
+
+  <div class="slide" style="background-image: url('https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=1920');">
+    <div class="gradient-top"></div>
+    <div class="gradient-bottom"></div>
+    <div class="bug">
+      <img src="logo.png" alt="FaithTree" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="fallback" style="display:none;">FT</div>
+    </div>
+    <div class="content">
+      <h1>Join Us</h1>
+      <ul>
+      <li>Come as you are — all are welcome</li>
+      <li>Bring a friend or come alone</li>
+      <li>Let's grow in faith together</li>
+    </ul>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button onclick="prevSlide()">← Prev</button>
+    <button onclick="nextSlide()">Next →</button>
+    <button onclick="toggleFullscreen()">Fullscreen</button>
+  </div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  let current = 0;
+  const progress = document.getElementById('progress');
+  
+  function showSlide(n) {
+    slides.forEach((s, i) => s.classList.toggle('active', i === n));
+    current = n;
+    progress.style.width = ((n + 1) / slides.length * 100) + '%';
+    
+    const content = slides[n].querySelector('.content');
+    if (content) {
+      content.style.animation = 'none';
+      content.offsetHeight;
+      content.style.animation = null;
+    }
+    
+    const bug = slides[n].querySelector('.bug');
+    if (bug) {
+      bug.style.animation = 'none';
+      bug.offsetHeight;
+      bug.style.animation = null;
+    }
+  }
+  
+  function nextSlide() {
+    if (current < slides.length - 1) showSlide(current + 1);
+  }
+  function prevSlide() {
+    if (current > 0) showSlide(current - 1);
+  }
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen();
+    }
+  }
+  
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); nextSlide(); }
+    if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prevSlide(); }
+    if (e.key === 'f' || e.key === 'F') toggleFullscreen();
+    if (e.key === 'Home') showSlide(0);
+    if (e.key === 'End') showSlide(slides.length - 1);
+  });
+  
+  let touchStartX = 0;
+  document.addEventListener('touchstart', e => { touchStartX = e.changedTouches[0].screenX; });
+  document.addEventListener('touchend', e => {
+    const diff = touchStartX - e.changedTouches[0].screenX;
+    if (Math.abs(diff) > 50) {
+      if (diff > 0) nextSlide(); else prevSlide();
+    }
+  });
+  
+  showSlide(0);
+</script>
+</body>
+</html>
