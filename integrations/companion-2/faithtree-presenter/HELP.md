@@ -3,7 +3,7 @@
 Server URL: `http://100.68.136.48:3210` (or your configured Presenter address).
 Companion must be able to reach that URL over the LAN or NetBird.
 
-This is a **Companion 2.x API 1.0 module**, targeting 2.4.2 and its Node 14.19
+This is a **Companion 2.x API 1.0 module**, targeting 2.4.2 and its bundled Node 14
 runtime. It is not a Companion 3.x/4.x import package. It has no npm dependencies.
 
 ## Button setup
@@ -67,8 +67,11 @@ folder or the newer module-import UI will load this module. Keep a separate
 Companion configuration export before changing that installation.
 
 The adapter's behavior is covered by automated tests against the real Presenter
-service. The 2.4.2 SDK contract is checked against upstream source, but a physical
-Companion application and Stream Deck still need an installation check.
+service. It has also passed a Node-only smoke test inside an isolated copy of
+Thomas's actual macOS 2.4.2 app (Electron 13.6.9 / Node 14.16.0), using the real
+SDK, native dependencies, and mesh connection. This test does not start another
+controller or send live commands. The physical Stream Deck still needs an
+installation check after activation.
 
 Upstream references:
 - https://github.com/bitfocus/companion/blob/v2.4.2/instance_skel.js
