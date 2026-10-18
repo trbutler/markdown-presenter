@@ -32,6 +32,8 @@ that file manually. Writes from the editor replace the file atomically. Keep
 
 The iframe is the live output, with a checkerboard behind transparent areas.
 It is not a separate rehearsal bus. Controls remain outside the OBS output.
+The active cue button shows a small progress bar and seconds remaining. Progress
+includes build-in, hold, and build-out; an early take-out updates the end time.
 
 ## OBS and the iPad
 
@@ -69,18 +71,33 @@ Mojolicious's trusted-proxy configuration for that deployment.
   independently. Edits apply on its next activation.
 - Service restart: saved cues survive; the output starts hidden.
 
-The default hold is 10 seconds after entry completes. Little Hills entry and
-exit each take 1.2 seconds. The server owns the timeline and broadcasts snapshots
+The default hold is 10 seconds after entry completes. Little Hills regular entry
+and exit each take 2 seconds, with the bars growing from the left at different
+rates. Build-out reverses the exact build-in poses, including a partial entry
+when interrupted. Full-width retains its 1.2-second entry and exit. The original
+1.2-second regular animation with the upper bar exiting to the right is preserved
+as the **Little Hills (alternate motion)** theme, under
+`themes/little-hills-directional/`. No default cue selects it.
+
+The server owns the timeline and broadcasts snapshots
 with server timestamps and revisions over Server-Sent Events (SSE). Clients
 anchor timestamps to their monotonic clocks rather than their wall clocks.
 This is a shared timeline, not frame-accurate broadcast synchronization: delivery
 latency can produce small differences between clients.
 
 If an output loses its connection, its current run still expires locally.
-It cannot discover a new queued cue until reconnecting. The operator page shows
-disconnection and disables trigger buttons. A fresh connection receives the
-current state. If an asset fails to load, output stays transparent and reports
-the error in its browser console.
+It cannot discover a new queued cue until reconnecting. The server sends a named
+heartbeat every 2 seconds. Clients mark the connection disconnected and rebuild
+the stream after 6.5 seconds without any message or heartbeat (checked once per
+second); browser offline events disable controls immediately. Returning online
+or bringing a stale tab to the foreground also reconnects. A connection is only
+shown as healthy after a fresh playback snapshot arrives, not merely when the
+socket opens. Failed initial control-page loads retry automatically, and control
+requests time out after 5 seconds without replaying trigger commands.
+
+A fresh connection receives the current state. If an asset fails to load, output
+stays transparent, reports the error in its browser console, and retries loading
+on the next state update or reconnection, even if the cue has not changed.
 
 ## Companion 2.x and Perl control
 
@@ -171,7 +188,9 @@ trusted code; the editor changes cue content, not templates or executable code.
 
 The manifest has `id`, `name`, `version: 1`, `variants` and `fonts` arrays,
 `fields` containing `{id, label}` text fields, `defaults` containing `variant`,
-`font`, and `holdMs`, plus positive `enterMs` and `exitMs` durations. Field IDs
+`font`, and `holdMs`, plus positive `enterMs` and `exitMs` durations. Optional
+`variantTimings` overrides both durations per variant, for example
+`{"regular":{"enterMs":2000,"exitMs":2000}}`. Field IDs
 must be unique and must not use reserved cue names (`id`, `label`, `theme`,
 `variant`, `font`, `holdMs`, or `holdSeconds`).
 
@@ -224,7 +243,9 @@ npm run test:browser
 The browser suite starts a temporary service on loopback port 3220, uses a
 temporary cue file, and writes screenshots to ignored `test-results/`. It
 checks transparency, fonts, synchronized clients, refresh, replacement,
-editing, escaping, offline completion, reconnection, and tablet layout.
+editing, escaping, offline completion, reconnection, tablet layout, exact
+reverse animation poses, progress, failed asset recovery, and a silent stalled
+server that requires heartbeat-based detection and automatic recovery.
 Node and Playwright are development tools only; playback needs Perl and a browser.
 
 Before the first broadcast, inspect both variants over real OBS camera video

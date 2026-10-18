@@ -25,8 +25,11 @@ export async function mount(root, {baseUrl, template, cue}) {
     render({phase, progress, exitFrom = 1, width, height}) {
       const scale = Math.min(width / 1920, height / 1080);
       stage.style.transform = `translate(${(width - 1920 * scale) / 2}px,${(height - 1080 * scale) / 2}px) scale(${scale})`;
-      const entry = phase === 'entering' ? progress : phase === 'exiting' ? exitFrom : 1;
-      const out = phase === 'exiting' ? progress : 0;
+      // The regular exit seeks backward through the exact build-in poses.
+      const reverse = cue.variant === 'regular';
+      const entry = phase === 'entering' ? progress
+        : phase === 'exiting' ? exitFrom * (reverse ? 1 - progress : 1) : 1;
+      const out = phase === 'exiting' && !reverse ? progress : 0;
       const bands = [
         [stage.querySelector('.lh-main'), 0, .86, -1920, 0],
         [stage.querySelector('.lh-top'), .12, .95, 1920, .08],

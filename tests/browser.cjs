@@ -39,11 +39,33 @@ const os = require('node:os');
     assert.equal(await output.locator('body').evaluate(el => getComputedStyle(el).backgroundColor), 'rgba(0, 0, 0, 0)');
     await command('trigger', 'timothy');
     await Promise.all([output.locator('.lh-logo').waitFor({state: 'visible'}), mirror.locator('.lh-logo').waitFor({state: 'visible'})]);
-    await output.waitForTimeout(1450);
+    await output.waitForTimeout(2250);
     assert.equal(await output.locator('.lh-line1').textContent(), 'Timothy Butler');
     assert.equal(await output.locator('.lh-line2').textContent(), 'Pastor');
     assert(await output.evaluate(() => document.fonts.check('400 48px "LH Quicksand"')));
     assert(await output.locator('.lh-logo').evaluate(el => el.complete && el.naturalWidth > 0));
+    const animation = await output.evaluate(async () => {
+      const baseUrl = '/themes/little-hills/';
+      const {mount} = await import(baseUrl + 'theme.js');
+      const template = await (await fetch(baseUrl + 'template.html')).text();
+      const root = document.createElement('div');
+      root.style.cssText = 'position:fixed;left:-10000px'; document.body.append(root);
+      const instance = await mount(root, {baseUrl, template, cue: {variant: 'regular', font: 'quicksand', line1: 'Test', line2: 'Test'}});
+      const pose = () => [...root.querySelectorAll('[style]')].map(el => el.getAttribute('style'));
+      const samples = [.25, .5, .75].map(progress => {
+        instance.render({phase: 'entering', progress, width: 1920, height: 1080});
+        const entry = pose();
+        const positions = [...root.querySelectorAll('.lh-band')].map(el => parseFloat(el.style.transform.slice(11)));
+        instance.render({phase: 'exiting', progress: 1 - progress, exitFrom: 1, width: 1920, height: 1080});
+        return {entry, exit: pose(), positions};
+      });
+      instance.unmount(); root.remove(); return samples;
+    });
+    for (const sample of animation) {
+      assert.deepEqual(sample.exit, sample.entry, 'Regular build-out exactly reverses build-in');
+      assert(sample.positions.every(x => x < 0), 'Regular bars grow from the left');
+      assert.equal(new Set(sample.positions).size, 3, 'Bars advance at different rates');
+    }
     await mkdir(path.join(repo, 'test-results'), {recursive: true});
     await output.screenshot({path: path.join(repo, 'test-results/little-hills-regular.png'), omitBackground: true});
     const started = (await state()).run.startedAt;
@@ -64,9 +86,17 @@ const os = require('node:os');
     await tablet.goto(base);
     await tablet.getByText('Connected', {exact: true}).waitFor();
     await command('show', 'timothy');
-    await tablet.waitForTimeout(1500);
+    const progress = tablet.locator('.cue[data-id="timothy"] progress');
+    await progress.waitFor({state: 'visible'});
+    const firstProgress = await progress.evaluate(el => el.value);
+    await tablet.waitForTimeout(2250);
+    assert(await progress.evaluate(el => el.value) > firstProgress, 'Cue progress advances');
+    assert.match(await tablet.locator('.cue[data-id="timothy"] .cue-remaining').textContent(), /^\d+s$/);
     await tablet.screenshot({path: path.join(repo, 'test-results/ipad-control.png')});
+    await command('trigger', 'timothy');
+    await tablet.waitForFunction(() => Number(document.querySelector('.cue[data-id="timothy"] .cue-remaining').textContent.replace('s', '')) <= 2);
     await command('clear');
+    await progress.waitFor({state: 'hidden'});
     await tablet.getByRole('button', {name: 'New cue', exact: true}).click();
     await tablet.getByLabel('Button label', {exact: true}).fill('Browser test');
     await tablet.getByLabel('Top line', {exact: true}).fill('<img src=x onerror=alert(1)>');
@@ -81,7 +111,7 @@ const os = require('node:os');
 
     // Disconnected output still completes the authoritative lifecycle locally.
     await context.setOffline(true);
-    await output.waitForTimeout(2200);
+    await output.waitForFunction(() => getComputedStyle(document.querySelector('#graphic')).visibility === 'hidden', null, {timeout: 6500});
     assert.equal(await output.locator('#graphic').evaluate(el => getComputedStyle(el).visibility), 'hidden');
     await context.setOffline(false);
     await command('show', 'timothy');
@@ -99,9 +129,39 @@ const os = require('node:os');
     assert.equal(await tablet.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'Tablet has no horizontal overflow');
     assert.deepEqual(errors, [], 'No browser exceptions');
     await command('clear');
-    console.log('Browser checks passed: transparency, fonts, two-client playback, refresh, replacement, cue editing, escaping, offline completion, reconnect, long text, tablet layout.');
+
+    // A failed first asset load must be retried when the stream reconnects,
+    // even though the active cue and its start timestamp have not changed.
+    const recovery = await browser.newPage();
+    await recovery.route('**/themes/little-hills/template.html', route => route.abort());
+    await recovery.goto(`${base}/output/lower-third`);
+    await command('show', 'timothy');
+    const recoveryStart = (await state()).run.startedAt;
+    await recovery.waitForTimeout(600);
+    assert.equal(await recovery.locator('#graphic').evaluate(el => getComputedStyle(el).visibility), 'hidden');
+    await recovery.unroute('**/themes/little-hills/template.html');
+    await recovery.context().setOffline(true);
+    await recovery.waitForTimeout(200);
+    await recovery.context().setOffline(false);
+    await recovery.locator('.lh-logo').waitFor({state: 'visible', timeout: 10000});
+    assert.equal((await state()).run.startedAt, recoveryStart, 'Asset recovery does not restart the cue');
+    await command('clear');
+    await recovery.close();
+
+    // Simulate a silent network black hole: TCP remains open, but the server
+    // stops processing. Browser online/offline events cannot detect this.
+    server.kill('SIGSTOP');
+    await tablet.locator('#connection[data-online="false"]').waitFor({timeout: 10000});
+    assert(await tablet.getByRole('button', {name: 'Timothy Butler', exact: true}).isDisabled());
+    server.kill('SIGCONT');
+    await tablet.locator('#connection[data-online="true"]').waitFor({timeout: 12000});
+    await tablet.getByRole('button', {name: 'Timothy Butler', exact: true}).click();
+    await output.waitForFunction(() => document.querySelector('.lh-line1')?.textContent === 'Timothy Butler');
+    await command('clear');
+    console.log('Browser checks passed, including reverse animation, cue progress, failed-asset recovery, and silent-connection timeout/recovery.');
   } finally {
     await browser?.close();
+    server.kill('SIGCONT');
     server.kill('SIGTERM');
     await rm(temp, {recursive: true, force: true});
   }

@@ -169,13 +169,17 @@ post '/commands' => sub {
         ($cue) = grep { $_->{id} eq ($body->{cueId} // '') } @$cues;
         return fail($c, 404, 'Unknown cue') unless $cue;
         my $theme = $themes{$cue->{theme}};
-        $cue = {%$cue, enterMs => $theme->{enterMs}, exitMs => $theme->{exitMs}};
+        my $timing = $theme->{variantTimings}{$cue->{variant}} // $theme;
+        $cue = {%$cue, enterMs => $timing->{enterMs}, exitMs => $timing->{exitMs}};
     }
     my $state = $output->command($action, $cue, now_ms());
     broadcast();
     $c->render(json => $state);
 };
 Mojo::IOLoop->recurring(0.025 => sub { broadcast() if $output->tick(now_ms()) });
-Mojo::IOLoop->recurring(15 => sub { $_->write(": heartbeat\n\n") for values %clients });
+Mojo::IOLoop->recurring(2 => sub {
+    my $heartbeat = "event: heartbeat\ndata: " . encode_json({serverNow => now_ms()}) . "\n\n";
+    $_->write($heartbeat) for values %clients;
+});
 $ENV{MOJO_LISTEN} //= 'http://127.0.0.1:3000';
 app->start;

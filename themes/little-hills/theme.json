@@ -2,10 +2,35 @@
   "id": "little-hills",
   "name": "Little Hills",
   "version": 1,
-  "variants": ["regular", "full-width"],
-  "fonts": ["quicksand", "serene-sands"],
-  "fields": [{"id":"line1","label":"Top line"},{"id":"line2","label":"Second line"}],
-  "defaults": {"variant":"regular","font":"quicksand","holdMs":10000},
+  "variants": [
+    "regular",
+    "full-width"
+  ],
+  "fonts": [
+    "quicksand",
+    "serene-sands"
+  ],
+  "fields": [
+    {
+      "id": "line1",
+      "label": "Top line"
+    },
+    {
+      "id": "line2",
+      "label": "Second line"
+    }
+  ],
+  "defaults": {
+    "variant": "regular",
+    "font": "quicksand",
+    "holdMs": 10000
+  },
   "enterMs": 1200,
-  "exitMs": 1200
+  "exitMs": 1200,
+  "variantTimings": {
+    "regular": {
+      "enterMs": 2000,
+      "exitMs": 2000
+    }
+  }
 }

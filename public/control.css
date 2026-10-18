@@ -120,6 +120,33 @@ iframe {
   padding:6px 12px;
   font-size:13px;
 }
+.cue-timeline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px 10px;
+}
+.cue-timeline progress {
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  height: 5px;
+  border: 0;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #34412e;
+  accent-color: #b9d36b;
+}
+.cue-timeline progress::-webkit-progress-bar { background: #34412e; }
+.cue-timeline progress::-webkit-progress-value { background: #b9d36b; }
+.cue-timeline progress::-moz-progress-bar { background: #b9d36b; }
+.cue-remaining {
+  min-width: 3ch;
+  color: #c4dd89;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
 button {
   font:inherit;
   cursor:pointer;

@@ -16,26 +16,31 @@ async function loadTheme(id) {
     if (!response.ok) throw new Error('Theme template unavailable');
     const template = await response.text();
     const style = document.createElement('link');
+    style.dataset.theme = id;
     style.rel = 'stylesheet'; style.href = `${baseUrl}style.css`;
     const ready = new Promise((resolve, reject) => { style.onload = resolve; style.onerror = reject; });
     document.head.append(style);
-    await ready;
-    return {baseUrl, template, module: await import(`${baseUrl}theme.js`)};
-  })());
+    try {
+      await ready;
+      return {baseUrl, template, module: await import(`${baseUrl}theme.js?load=${Date.now()}`)};
+    } catch (error) { style.remove(); throw error; }
+  })().catch(error => { loadedThemes.delete(id); throw error; }));
   return loadedThemes.get(id);
 }
 
 async function changeTheme(run, key) {
   const version = ++generation;
   wantedKey = key;
+  failedKey = '';
   root.style.visibility = 'hidden';
   mounted?.unmount(); mounted = null; mountedKey = '';
   if (!run) return;
+  let staging;
   try {
     const theme = await loadTheme(run.cue.theme);
     if (version !== generation) return;
     // Stage offscreen to prevent an obsolete async mount from overwriting a new cue.
-    const staging = document.createElement('div');
+    staging = document.createElement('div');
     staging.style.cssText = 'position:absolute;inset:0;visibility:hidden';
     root.append(staging);
     const instance = await theme.module.mount(staging, {...theme, cue: run.cue});
@@ -44,7 +49,12 @@ async function changeTheme(run, key) {
     mounted = {render: state => instance.render(state), unmount() { instance.unmount(); staging.remove(); }};
     mountedKey = key;
   } catch (error) {
-    if (version === generation) failedKey = key;
+    staging?.remove();
+    if (version === generation) {
+      failedKey = key;
+      loadedThemes.delete(run.cue.theme);
+      document.querySelector(`link[data-theme="${run.cue.theme}"]`)?.remove();
+    }
     console.error('Output theme failed to load', error);
     // A failed theme stays transparent; diagnostic information stays in console.
   }
@@ -53,7 +63,7 @@ async function changeTheme(run, key) {
 const connection = subscribe(output, snapshot => {
   const run = snapshot.run;
   const key = run ? JSON.stringify([run.startedAt, run.cue]) : '';
-  if (key !== wantedKey) changeTheme(run, key);
+  if (key !== wantedKey || (key && key === failedKey)) changeTheme(run, key);
 });
 
 function frame() {
