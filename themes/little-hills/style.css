@@ -1,0 +1,29 @@
+@font-face {
+  font-family: 'LH Quicksand';
+  src: url('./assets/Quicksand.ttf') format('truetype');
+  font-weight: 300 700;
+  font-display: block;
+}
+@font-face {
+  font-family: 'LH Serene Sands';
+  src: url('./assets/SereneSands-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: block;
+}
+.lh-stage { position: absolute; width: 1920px; height: 1080px; transform-origin: 0 0; color: #2b371e; }
+.lh-band { position: absolute; left: 0; }
+.lh-top { top: 800px; width: 1344px; height: 121px; background: rgb(190 209 116 / .60); z-index: 1; }
+.lh-main { top: 836px; width: 1536px; height: 151px; background: rgb(190 209 116 / .835); z-index: 2; }
+.lh-bottom { top: 921px; width: 1440px; height: 100px; background: rgb(45 55 32 / .80); z-index: 0; }
+.lh-logo { position: absolute; width: 200px; height: 200px; left: 24px; top: 812px; backface-visibility: visible; z-index: 3; }
+.lh-copy { position: absolute; left: 250px; top: 836px; width: 1230px; font-family: 'LH Quicksand', sans-serif; z-index: 4; }
+.lh-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.15; }
+.lh-line1 { height: 85px; display: flex; align-items: center; font-size: 72px; font-weight: 400; }
+.lh-line2 { height: 67px; font-size: 48px; font-weight: 300; color: #465c2d; }
+.lh-stage.full-width .lh-top { width: 1920px; }
+.lh-stage.full-width .lh-main { width: 1920px; height: 200px; }
+.lh-stage.full-width .lh-bottom { width: 1920px; }
+.lh-stage.full-width .lh-copy { width: 1600px; }
+.lh-stage.full-width .lh-line2 { height: 95px; font-size: 64px; }
+.lh-stage.serene-sands .lh-copy { font-family: 'LH Serene Sands', sans-serif; }
+.lh-stage.serene-sands .lh-line1 { font-weight: 400; }

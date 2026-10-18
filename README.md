@@ -1,5 +1,9 @@
 # FaithTree / Markdown Presenter
 
+The `feature/display-control` branch adds a separate live lower-third service.
+Existing deck generation and playback are preserved. See [Live display setup](docs/display-control.md)
+for OBS, iPad controls, Companion, and the theme folder interface.
+
 A lightweight HTML presentation generator that replicates a Keynote-style template:
 
 - Full-bleed photo background per slide

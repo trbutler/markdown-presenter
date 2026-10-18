@@ -1,0 +1,181 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use feature 'lexical_subs';
+use FindBin;
+use lib "$FindBin::Bin/../lib";
+use lib "$FindBin::Bin/../local/lib/perl5";
+use Mojolicious::Lite;
+use Mojo::File qw(path);
+use Mojo::JSON qw(decode_json encode_json);
+use Time::HiRes qw(time);
+use Presenter::Output;
+
+my $root = path(__FILE__)->to_abs->dirname->dirname;
+my $store = path($ENV{PRESENTER_CUES} // $root->child('var/cues.json'));
+my $output = Presenter::Output->new;
+my (%themes, %clients);
+my $sequence = 0;
+my sub now_ms { int(time * 1000) }
+
+for my $file ($root->child('themes')->list({dir => 1})->each) {
+    next unless -d $file && -f $file->child('theme.json');
+    my $theme = decode_json($file->child('theme.json')->slurp);
+    die "Invalid theme folder\n" unless $theme->{id} eq $file->basename
+        && $theme->{id} =~ /^[a-z0-9-]+$/;
+    die "Invalid animation durations\n" unless $theme->{enterMs} > 0 && $theme->{exitMs} > 0;
+    $themes{$theme->{id}} = $theme;
+}
+die "No themes found\n" unless keys %themes;
+
+my sub validate_cue {
+    my ($cue) = @_;
+    die "Cue must be an object\n" unless ref($cue) eq 'HASH';
+    for my $field (qw(id label theme variant font)) {
+        die "Missing $field\n" unless defined($cue->{$field}) && !ref($cue->{$field}) && length($cue->{$field});
+    }
+    die "Invalid cue ID\n" unless $cue->{id} =~ /^[a-zA-Z0-9_-]{1,80}$/;
+    die "Label too long\n" if length($cue->{label}) > 100;
+    my $theme = $themes{$cue->{theme}} or die "Unknown theme\n";
+    die "Unknown variant\n" unless grep { $_ eq $cue->{variant} } @{$theme->{variants}};
+    die "Unknown font\n" unless grep { $_ eq $cue->{font} } @{$theme->{fonts}};
+    die "Invalid holdMs (0..3600000)\n" unless defined($cue->{holdMs}) && !ref($cue->{holdMs})
+        && $cue->{holdMs} =~ /^\d+$/ && $cue->{holdMs} <= 3600000;
+    my %clean = map { $_ => $cue->{$_} } qw(id label theme variant font holdMs);
+    for my $field (@{$theme->{fields}}) {
+        my $value = $cue->{$field->{id}} // '';
+        die "Invalid $field->{id}\n" if ref($value) || length($value) > 200 || $value =~ /[\r\n]/;
+        $clean{$field->{id}} = $value;
+    }
+    return \%clean;
+}
+my $seed = decode_json($root->child('config/cues.example.json')->slurp);
+my $cues = -f $store ? decode_json($store->slurp) : $seed;
+die "Cue store must be an array\n" unless ref($cues) eq 'ARRAY';
+my %ids;
+$cues = [map { my $cue = validate_cue($_); die "Duplicate cue ID\n" if $ids{$cue->{id}}++; $cue } @$cues];
+
+my sub save_cues {
+    my ($next) = @_;
+    $store->dirname->make_path;
+    my $temp = path("$store.$$.tmp");
+    $temp->spurt(encode_json($next));
+    rename "$temp", "$store" or die "Cannot save cues: $!\n";
+    $cues = $next;
+}
+my sub broadcast {
+    my $data = 'data: ' . encode_json($output->snapshot(now_ms())) . "\n\n";
+    $_->write($data) for values %clients;
+}
+my sub fail {
+    my ($c, $status, $message) = @_;
+    $message =~ s/\s+at\s+.*//s;
+    $c->render(status => $status, json => {error => $message});
+    return undef;
+}
+my sub body_object {
+    my ($c) = @_;
+    my $data = $c->req->json;
+    die "Expected a JSON object\n" unless ref($data) eq 'HASH';
+    return $data;
+}
+
+# Only intentionally public directories are served; cue files and source stay private.
+app->static->paths([$root->child('public')->to_string]);
+app->max_request_size(65536);
+app->secrets([$ENV{PRESENTER_SECRET} // 'local-display-control']);
+under sub {
+    my ($c) = @_;
+    $c->res->headers->cache_control('no-store');
+    $c->res->headers->header('X-Content-Type-Options' => 'nosniff');
+    # Reject browser writes from another origin; Companion/Perl have no Origin.
+    if ($c->req->method ne 'GET' && (my $origin = $c->req->headers->origin)) {
+        my $expected = $c->req->url->to_abs->base->to_string;
+        $expected =~ s{/$}{};
+        return fail($c, 403, 'Cross-origin writes are disabled') if $origin ne $expected;
+    }
+    return 1;
+};
+get '/' => sub { shift->reply->static('control.html') };
+get '/output/:output' => sub {
+    my ($c) = @_;
+    return fail($c, 404, 'Unknown output') unless $c->stash('output') eq 'lower-third';
+    $c->reply->static('output.html');
+};
+get '/themes/:theme/*asset' => sub {
+    my ($c) = @_;
+    my $theme = $c->stash('theme');
+    return fail($c, 404, 'Unknown theme') unless $themes{$theme};
+    my $asset = $c->stash('asset');
+    return fail($c, 404, 'Unknown asset') if $asset =~ m{(?:^|/)\.|\\} || $asset =~ /[^a-zA-Z0-9_.\/-]/;
+    my $file = $root->child('themes', $theme, split '/', $asset);
+    return fail($c, 404, 'Unknown asset') unless -f $file && !-l $file;
+    $c->reply->file($file);
+};
+get '/api/v1/themes' => sub { shift->render(json => [map { $themes{$_} } sort keys %themes]) };
+get '/api/v1/cues' => sub { shift->render(json => $cues) };
+post '/api/v1/cues' => sub {
+    my ($c) = @_;
+    my $cue = eval { validate_cue(body_object($c)) };
+    return fail($c, 400, $@) if $@;
+    return fail($c, 409, 'Cue ID already exists') if grep { $_->{id} eq $cue->{id} } @$cues;
+    eval { save_cues([@$cues, $cue]) };
+    return fail($c, 500, 'Could not save cues') if $@;
+    $c->render(status => 201, json => $cue);
+};
+put '/api/v1/cues/:id' => sub {
+    my ($c) = @_;
+    return fail($c, 404, 'Unknown cue') unless grep { $_->{id} eq $c->stash('id') } @$cues;
+    my $cue = eval { validate_cue(body_object($c)) };
+    return fail($c, 400, $@) if $@;
+    return fail($c, 400, 'Cue ID cannot change') unless $cue->{id} eq $c->stash('id');
+    eval { save_cues([map { $_->{id} eq $cue->{id} ? $cue : $_ } @$cues]) };
+    return fail($c, 500, 'Could not save cues') if $@;
+    $c->render(json => $cue);
+};
+del '/api/v1/cues/:id' => sub {
+    my ($c) = @_;
+    return fail($c, 404, 'Unknown cue') unless grep { $_->{id} eq $c->stash('id') } @$cues;
+    eval { save_cues([grep { $_->{id} ne $c->stash('id') } @$cues]) };
+    return fail($c, 500, 'Could not save cues') if $@;
+    $c->render(json => {deleted => $c->stash('id')});
+};
+under '/api/v1/outputs/:output' => sub {
+    my ($c) = @_;
+    return fail($c, 404, 'Unknown output') unless $c->stash('output') eq 'lower-third';
+    return 1;
+};
+get '/state' => sub { shift->render(json => $output->snapshot(now_ms())) };
+get '/events' => sub {
+    my ($c) = @_;
+    $c->res->headers->content_type('text/event-stream');
+    $c->res->headers->header('X-Accel-Buffering' => 'no');
+    $c->inactivity_timeout(45);
+    $c->render_later;
+    my $id = ++$sequence;
+    $clients{$id} = $c;
+    $c->on(finish => sub { delete $clients{$id} });
+    $c->write('retry: 1000' . "\n" . 'data: ' . encode_json($output->snapshot(now_ms())) . "\n\n");
+};
+post '/commands' => sub {
+    my ($c) = @_;
+    my $body = eval { body_object($c) };
+    return fail($c, 400, $@) if $@;
+    my $action = $body->{action} // '';
+    return fail($c, 400, 'Unknown action') if ref($action) || $action !~ /^(trigger|show|hide|clear)$/;
+    my $cue;
+    if ($action eq 'trigger' || $action eq 'show') {
+        return fail($c, 400, 'cueId must be a string') if ref($body->{cueId});
+        ($cue) = grep { $_->{id} eq ($body->{cueId} // '') } @$cues;
+        return fail($c, 404, 'Unknown cue') unless $cue;
+        my $theme = $themes{$cue->{theme}};
+        $cue = {%$cue, enterMs => $theme->{enterMs}, exitMs => $theme->{exitMs}};
+    }
+    my $state = $output->command($action, $cue, now_ms());
+    broadcast();
+    $c->render(json => $state);
+};
+Mojo::IOLoop->recurring(0.025 => sub { broadcast() if $output->tick(now_ms()) });
+Mojo::IOLoop->recurring(15 => sub { $_->write(": heartbeat\n\n") for values %clients });
+$ENV{MOJO_LISTEN} //= 'http://127.0.0.1:3000';
+app->start;

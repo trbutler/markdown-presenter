@@ -1,1 +1,7 @@
 media/
+
+# Display service state and local dependencies
+/var/
+/local/
+/node_modules/
+/test-results/
