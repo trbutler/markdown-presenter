@@ -33,8 +33,11 @@ export async function mount(root, {baseUrl, template, cue}) {
         [stage.querySelector('.lh-bottom'), .06, 1, -1920, .06],
       ];
       for (const [band, start, end, offset, delay] of bands) {
-        const visible = segment(entry, start, end) * (1 - segment(out, delay, 1));
-        band.style.transform = `translateX(${offset * (1 - visible)}px)`;
+        const entered = segment(entry, start, end);
+        const exited = segment(out, delay, 1);
+        const entryOffset = cue.variant === 'regular' ? -1920 : offset;
+        const visible = entered * (1 - exited);
+        band.style.transform = `translateX(${entryOffset * (1 - entered) + offset * entered * exited}px)`;
         band.style.opacity = String(visible);
       }
       const logoIn = segment(entry, 0, .85);
