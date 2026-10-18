@@ -1,6 +1,6 @@
 {
   "name": "markdown-presenter-display-tests",
   "private": true,
-  "scripts": {"test:browser": "node tests/browser.cjs"},
+  "scripts": {"test:browser": "node tests/browser.cjs", "test:companion": "node --test tests/companion.test.cjs"},
   "devDependencies": {"playwright": "1.64.1"}
 }

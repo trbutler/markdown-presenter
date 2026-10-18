@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+presenter_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+package_directory=${1:-"$presenter_root/public/downloads"}
+mkdir -p "$package_directory"
+package_file="$package_directory/faithtree-presenter-companion-2.4.2.tar.gz"
+tar -czf "$package_file" -C "$presenter_root/integrations/companion-2" faithtree-presenter
+printf '%s\n' "$package_file"

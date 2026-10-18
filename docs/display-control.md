@@ -124,6 +124,21 @@ Generic HTTP actions do not provide automatic on-air button feedback. The
 installed Companion 2.x application still needs an on-site integration check;
 the HTTP requests themselves are covered by automated tests.
 
+For state-driven button lighting, this branch also includes a dedicated
+[Companion 2.4.2 adapter](../integrations/companion-2/faithtree-presenter/HELP.md).
+It supplies cue presets, trigger actions, on-air feedback, disconnected feedback,
+and remaining-time variables using the same state stream as the web controls.
+Existing Generic HTTP trigger actions can be retained while adding the adapter's
+feedback. Its default light turns off at the start of build-out; the feedback's
+**Keep lit during build-out** checkbox keeps it lit until animation completion.
+
+Package it with `sh script/package-companion-2`. This creates an archive under
+`public/downloads/`, available from the preview service at
+`/downloads/faithtree-presenter-companion-2.4.2.tar.gz`. Installation depends on
+the layout of the Companion 2.4.2 application; see the adapter's help before
+copying it into an application tree. Modern module-import packages cannot be
+assumed to work on 2.x.
+
 Example Perl sender using the same API:
 
 ```perl
@@ -238,6 +253,7 @@ PERL5LIB=local/lib/perl5 prove -l t
 npm ci
 npx playwright install chromium
 npm run test:browser
+npm run test:companion
 ```
 
 The browser suite starts a temporary service on loopback port 3220, uses a

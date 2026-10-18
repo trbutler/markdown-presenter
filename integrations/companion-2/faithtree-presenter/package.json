@@ -1,0 +1,14 @@
+{
+  "name": "faithtree-presenter",
+  "version": "0.1.0",
+  "api_version": "1.0.0",
+  "manufacturer": "FaithTree",
+  "product": "Presenter",
+  "shortname": "presenter",
+  "description": "Control Presenter cues with live on-air feedback in Companion 2.4.2",
+  "keywords": ["Graphics"],
+  "main": "index.js",
+  "author": "FaithTree",
+  "engines": {"node": ">=14.19.0"},
+  "dependencies": {}
+}
