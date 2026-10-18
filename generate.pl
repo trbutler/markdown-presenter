@@ -2,11 +2,14 @@
 use strict;
 use warnings;
 use utf8;
+use FindBin;
+use JSON::PP;
 binmode STDOUT, ':utf8';
+binmode STDERR, ':utf8';
 
 # FaithTree Presenter Generator
 # Usage: perl generate.pl slides.md > presentation.html
-# Or: perl generate.pl slides.md presentation.html
+# Or:    perl generate.pl slides.md presentation.html
 
 my $input  = shift @ARGV or die "Usage: $0 <markdown-file> [output.html]\n";
 my $output = shift @ARGV;
@@ -14,76 +17,333 @@ my $output = shift @ARGV;
 open my $fh, '<:utf8', $input or die "Cannot open $input: $!";
 my $md = do { local $/; <$fh> };
 close $fh;
+$md =~ s/\r\n/\n/g;
+$md =~ s/\r/\n/g;
 
-# Read template
-my $template_path = 'template.html';
-open my $tfh, '<:utf8', $template_path or die "Cannot open $template_path (run from the same directory): $!";
+my $template_path = -f 'template.html' ? 'template.html' : "$FindBin::Bin/template.html";
+open my $tfh, '<:utf8', $template_path or die "Cannot open $template_path: $!";
 my $template = do { local $/; <$tfh> };
 close $tfh;
 
-# Split into slides on --- (with optional surrounding whitespace)
-my @blocks = split /\n\s*---\s*\n/, $md;
-my @slides_html;
+my @blocks = parse_blocks($md);
+my $model  = build_model(@blocks);
+my $html   = render($template, $model);
 
-for my $block (@blocks) {
-    $block =~ s/^\s+|\s+$//g;
-    next unless length $block;
+if ($output) {
+    open my $out, '>:utf8', $output or die "Cannot write $output: $!";
+    print $out $html;
+    close $out;
+    my $n = scalar @{ $model->{main} };
+    my $f = scalar @{ $model->{fillers} };
+    print STDERR "Wrote $output ($n slides, $f fillers)\n";
+} else {
+    print $html;
+}
+
+sub parse_blocks {
+    my ($text) = @_;
+    my @blocks;
+    my @lines;
+    foreach my $line (split /\n/, $text) {
+        if ($line =~ /^---\s*$/) {
+            push @blocks, [@lines] if @lines;
+            @lines = ();
+        } else {
+            push @lines, $line;
+        }
+    }
+    push @blocks, [@lines] if @lines;
+    return @blocks;
+}
+
+sub parse_slide {
+    my (@lines) = @_;
+    my %dir;
+    my ($kicker, $title, $bg, $video) = ('', '', '', '');
+    my (@bullets, @subtitle);
+
+    foreach my $line (@lines) {
+        if ($line =~ /^\s*\/\/\s*([A-Za-z][\w-]*)(?:\s*:\s*(.*?))?\s*$/) {
+            my ($key, $value) = ($1, $2);
+            $value =~ s/\s+$// if defined $value;
+            $dir{$key} = $value;
+        } elsif ($line =~ /^\s*bg:\s*(\S+)\s*$/ || $line =~ /^\s*!\[bg\]\((.+?)\)\s*$/) {
+            $bg = $1;
+        } elsif ($line =~ /^\s*##\s+(.+?)\s*$/) {
+            $kicker = $1;
+        } elsif ($line =~ /^\s*#\s+(.+?)\s*$/) {
+            $title = $1;
+        } elsif ($line =~ /^\s*[-*+]\s+(.+?)\s*$/) {
+            push @bullets, $1;
+        } elsif ($line =~ /\S/) {
+            my $text = $line;
+            $text =~ s/^\s+|\s+$//g;
+            push @subtitle, $text;
+        }
+    }
+
+    if (exists $dir{video}) {
+        die "// video needs a file path\n" unless defined $dir{video} && length $dir{video};
+        $video = $dir{video};
+    }
+    my $has = length($kicker) || length($title) || length($bg) || length($video)
+        || @bullets || @subtitle;
+
+    return {
+        dir      => \%dir,
+        kicker   => $kicker,
+        title    => $title,
+        subtitle => join("\n", @subtitle),
+        bullets  => \@bullets,
+        bg       => $bg,
+        video    => $video // '',
+        has      => $has ? 1 : 0,
+        glued    => (defined $dir{position} && $dir{position} eq 'glued') ? 1 : 0,
+    };
+}
+
+sub build_model {
+    my (@raw_blocks) = @_;
+    my %deck = (
+        seed        => undef,
+        autoAdvance => undef,
+        loop        => JSON::PP::false,
+        fadeMs      => 2000,
+        audio       => undef,
+    );
+    my @sections;
+    my @fillers;
+    my $current;
+    my $mode = 'main';
+    my $seen_section = 0;
+
+    my $new_section = sub {
+        my ($name) = @_;
+        my $section = { name => $name // '', insert => 1, audio => undef, slides => [] };
+        push @sections, $section;
+        return $section;
+    };
+
+    foreach my $lines (@raw_blocks) {
+        my $slide = parse_slide(@$lines);
+        my $dir = $slide->{dir};
+
+        foreach my $unknown (sort keys %$dir) {
+            next if $unknown =~ /^(seed|autoAdvance|loop|fade|audio|type|section|insert|position|video|name|title|buildIn|buildOut)$/;
+            warn "Unknown directive //$unknown\n";
+        }
+
+        $deck{seed} = int($dir->{seed}) if exists $dir->{seed} && defined $dir->{seed} && $dir->{seed} =~ /^-?\d+$/;
+        if (exists $dir->{seed} && defined $dir->{seed} && $dir->{seed} !~ /^-?\d+$/) {
+            die "Bad seed: $dir->{seed}\n";
+        }
+        $deck{autoAdvance} = duration_ms($dir->{autoAdvance}) if exists $dir->{autoAdvance};
+        $deck{loop} = boolish($dir->{loop}) ? JSON::PP::true : JSON::PP::false if exists $dir->{loop};
+        $deck{fadeMs} = duration_ms($dir->{fade}) if exists $dir->{fade};
+
+        if (exists $dir->{type} && defined $dir->{type} && $dir->{type} eq 'fillers') {
+            $mode = 'filler';
+        } elsif (exists $dir->{type}) {
+            die "Unknown // type: " . ($dir->{type} // '') . "\n";
+        }
+
+        if ($mode eq 'filler') {
+            warn "// section inside the filler pool is ignored\n" if exists $dir->{section};
+            push @fillers, $slide if $slide->{has};
+            next;
+        }
+
+        if (!$slide->{video} && grep { exists $dir->{$_} } qw(name title buildIn buildOut)) {
+            warn "Lower third directives are only used on a video slide\n";
+        }
+
+        if (exists $dir->{section}) {
+            $seen_section = 1;
+            my $name = defined $dir->{section} ? $dir->{section} : '';
+            if (!$current || @{ $current->{slides} }) {
+                $current = $new_section->($name);
+            } else {
+                $current->{name} = $name;
+            }
+        }
+
+        if (exists $dir->{insert}) {
+            my $n = $dir->{insert};
+            die "Bad insert: " . ($n // '') . "\n" unless defined $n && $n =~ /^\d+$/;
+            $current ||= $new_section->('');
+            $current->{insert} = int($n);
+        }
+
+        if (exists $dir->{audio}) {
+            my $audio = $dir->{audio};
+            die "// audio needs a path or stop\n" unless defined $audio && length $audio;
+            if (!$seen_section && !$current) {
+                $deck{audio} = $audio;
+            } else {
+                $current ||= $new_section->('');
+                $current->{audio} = $audio;
+            }
+        }
+
+        if ($slide->{has}) {
+            $current ||= $new_section->('');
+            push @{ $current->{slides} }, $slide;
+        }
+    }
+
+    return {
+        deck     => \%deck,
+        sections => \@sections,
+        main     => [ map { @{ $_->{slides} } } @sections ],
+        fillers  => \@fillers,
+    };
+}
+
+sub render {
+    my ($template, $model) = @_;
+    my @html;
+    my $index = 0;
+    foreach my $section (@{ $model->{sections} }) {
+        foreach my $slide (@{ $section->{slides} }) {
+            push @html, slide_html($slide, 'main', $index, $section->{name});
+        }
+        $index++;
+    }
+    push @html, slide_html($_, 'filler', '', '') for @{ $model->{fillers} };
+
+    my @section_json = map {
+        {
+            name   => $_->{name},
+            insert => $_->{insert},
+            audio  => $_->{audio},
+        }
+    } @{ $model->{sections} };
+
+    my $config = {
+        seed        => $model->{deck}{seed},
+        autoAdvance => $model->{deck}{autoAdvance},
+        loop        => $model->{deck}{loop},
+        fadeMs      => $model->{deck}{fadeMs},
+        audio       => $model->{deck}{audio},
+        sections    => \@section_json,
+    };
+    my $json = JSON::PP->new->ascii->canonical->encode($config);
+    $json =~ s/</\\u003c/g;
+
+    my $slides = join("\n", @html);
+    $template =~ s/<!-- SLIDES_PLACEHOLDER -->/$slides/;
+    $template =~ s|/\* DECK_CONFIG \*/|$json|;
+    return $template;
+}
+
+sub slide_html {
+    my ($slide, $deck_name, $section_index, $section_name) = @_;
+    my $kind = length($slide->{video}) ? 'video' : 'slide';
+    my @attrs = (
+        'class="' . ($kind eq 'video' ? 'slide slide-video' : 'slide') . '"',
+        'data-deck="' . esc($deck_name) . '"',
+        'data-kind="' . $kind . '"',
+    );
+    push @attrs, 'data-section-index="' . esc($section_index) . '"' if $section_index ne '';
+    push @attrs, 'data-section="' . esc($section_name) . '"' if defined $section_name && $section_name ne '';
+    push @attrs, 'data-glued="1"' if $slide->{glued};
+
+    if ($kind eq 'video') {
+        my $src = esc($slide->{video});
+        $src =~ s/ /%20/g;
+        push @attrs, 'data-video="' . $src . '"';
+        my $attr = join ' ', @attrs;
+        my $lower = lower_third_html($slide);
+        return <<"HTML";
+  <div $attr>
+    <video playsinline preload="none" src="$src"></video>
+$lower  </div>
+HTML
+    }
 
     my $bg = '';
+    if (length $slide->{bg}) {
+        $bg = '    <div class="slide-bg" style="background-image: url(\'' . esc($slide->{bg}) . '\')"></div>' . "\n";
+    }
+    my $kicker = '';
+    if (length $slide->{kicker}) {
+        $kicker = '    <div class="kicker">' . esc($slide->{kicker}) . "</div>\n";
+    }
     my $title = '';
-    my @bullets;
-
-    # Extract bg: path or ![bg](path)
-    if ($block =~ m{^(?:bg:\s*|\s*!\[bg\]\()(\S+?)\)?\s*$}m) {
-        $bg = $1;
-        $bg =~ s/^\s+|\s+$//g;
+    if (length $slide->{title}) {
+        $title = '      <h1>' . esc($slide->{title}) . "</h1>\n";
     }
-
-    # Extract first # heading as title
-    if ($block =~ m/^#\s+(.+)$/m) {
-        $title = $1;
-        $title =~ s/\s+$//;
+    my $subtitle = '';
+    if (length $slide->{subtitle}) {
+        my $text = join('<br>', map { esc($_) } split /\n/, $slide->{subtitle});
+        $subtitle = '      <p class="subtitle">' . $text . "</p>\n";
     }
-
-    # Extract bullet points (lines starting with - or * or +)
-    while ($block =~ m/^\s*[-*+]\s+(.+)$/mg) {
-        push @bullets, $1;
+    my $bullets = '';
+    if (@{ $slide->{bullets} }) {
+        $bullets = "      <ul>\n"
+            . join('', map { '        <li>' . esc($_) . "</li>\n" } @{ $slide->{bullets} })
+            . "      </ul>\n";
     }
-
-    # Build slide HTML
-    my $bg_style = $bg ? qq{ style="background-image: url('$bg');"} : '';
-    my $bullets_html = '';
-    if (@bullets) {
-        $bullets_html = "<ul>\n" . join("\n", map { "      <li>$_</li>" } @bullets) . "\n    </ul>";
-    }
-
-    my $slide = <<"HTML";
-  <div class="slide"$bg_style>
-    <div class="gradient-top"></div>
+    my $attr = join ' ', @attrs;
+    return <<"HTML";
+  <div $attr>
+$bg    <div class="gradient-top"></div>
     <div class="gradient-bottom"></div>
     <div class="bug">
       <img src="logo.png" alt="FaithTree" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
       <div class="fallback" style="display:none;">FT</div>
     </div>
-    <div class="content">
-      <h1>$title</h1>
-      $bullets_html
-    </div>
+$kicker    <div class="content">
+$title$subtitle$bullets    </div>
   </div>
 HTML
-
-    push @slides_html, $slide;
 }
 
-my $slides_block = join "\n", @slides_html;
+sub lower_third_html {
+    my ($slide) = @_;
+    my $dir = $slide->{dir};
+    my $wanted = grep { exists $dir->{$_} } qw(name title buildIn buildOut);
+    return '' unless $wanted;
+    my $build_in  = exists $dir->{buildIn}  ? duration_ms($dir->{buildIn})  : 3000;
+    my $build_out = exists $dir->{buildOut} ? duration_ms($dir->{buildOut}) : 8000;
+    my $name  = exists $dir->{name}  ? esc($dir->{name}  // '') : '';
+    my $title = exists $dir->{title} ? esc($dir->{title} // '') : '';
+    return <<"HTML";
+    <div class="lower-third" data-build-in="$build_in" data-build-out="$build_out">
+      <div class="lt-window">
+        <div class="lt-bar">
+          <div class="lt-name">$name</div>
+          <div class="lt-title">$title</div>
+        </div>
+      </div>
+      <img class="lt-logo" src="logo.png" alt="">
+    </div>
+HTML
+}
 
-$template =~ s/<!-- SLIDES_PLACEHOLDER -->/$slides_block/;
+sub esc {
+    my ($s) = @_;
+    $s = '' unless defined $s;
+    $s =~ s/&/&amp;/g;
+    $s =~ s/</&lt;/g;
+    $s =~ s/>/&gt;/g;
+    $s =~ s/"/&quot;/g;
+    return $s;
+}
 
-if ($output) {
-    open my $out, '>:utf8', $output or die "Cannot write $output: $!";
-    print $out $template;
-    close $out;
-    print STDERR "Wrote $output (" . scalar(@slides_html) . " slides)\n";
-} else {
-    print $template;
+sub duration_ms {
+    my ($value) = @_;
+    die "Missing duration\n" unless defined $value && $value ne '';
+    return int($1) if $value =~ /^(\d+)\s*ms$/i;
+    return int($1 * 1000) if $value =~ /^(\d+(?:\.\d+)?)\s*s$/i;
+    return int($value) if $value =~ /^\d+$/;
+    die "Bad duration: $value\n";
+}
+
+sub boolish {
+    my ($value) = @_;
+    return 1 if !defined $value || $value eq '';
+    return 0 if $value =~ /^(0|false|no|off)$/i;
+    return 1 if $value =~ /^(1|true|yes|on)$/i;
+    die "Bad boolean: $value\n";
 }

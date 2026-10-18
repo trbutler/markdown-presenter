@@ -5,9 +5,69 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FaithTree Presentation</title>
 <style>
+  /* Olivette, SIL OFL. Variable faces first in the cascade for browsers
+     that understand a weight range; static faces cover the rest. */
+  @font-face {
+    font-family: "Olivette";
+    src: url("fonts/olivette/Olivette-Regular.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: "Olivette";
+    src: url("fonts/olivette/Olivette-Bold.woff2") format("woff2");
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: "Olivette";
+    src: url("fonts/olivette/Olivette-Italic.woff2") format("woff2");
+    font-weight: 400;
+    font-style: italic;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: "Olivette";
+    src: url("fonts/olivette/Olivette-BoldItalic.woff2") format("woff2");
+    font-weight: 700;
+    font-style: italic;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: "Olivette";
+    src: url("fonts/olivette/Olivette[opsz,wght].woff2") format("woff2-variations");
+    font-weight: 400 700;
+    font-style: normal;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: "Olivette";
+    src: url("fonts/olivette/Olivette-Italic[opsz,wght].woff2") format("woff2-variations");
+    font-weight: 400 700;
+    font-style: italic;
+    font-display: swap;
+  }
+  /* D-DIN Condensed, Datto / Monotype, SIL OFL. Reserved name: keep the family name. */
+  @font-face {
+    font-family: "D-DIN Condensed";
+    src: url("fonts/d-din/D-DINCondensed.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: "D-DIN Condensed";
+    src: url("fonts/d-din/D-DINCondensed-Bold.woff2") format("woff2");
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { height: 100%; overflow: hidden; background: #000; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #fff; }
-  
+  html, body { height: 100%; overflow: hidden; background: #000; font-family: "Olivette", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #fff; }
+  button { font-family: inherit; }
+
   .slide {
     position: absolute;
     top: 0; left: 0;
@@ -16,19 +76,39 @@
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
+    overflow: hidden;
     opacity: 0;
     transition: opacity 0.6s ease;
+    --slide-left: 64px;
     display: flex;
-    align-items: center;
-    justify-content: center;
+    align-items: flex-end;
+    justify-content: flex-start;
+    padding: 108px 0 88px;
   }
   .slide.active { opacity: 1; z-index: 10; }
-  
+
+  .slide-bg {
+    position: absolute;
+    inset: -12px;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    z-index: 0;
+  }
+  .slide.active .slide-bg {
+    animation: blurBg 2.5s ease forwards;
+  }
+  @keyframes blurBg {
+    from { filter: blur(0px); }
+    to   { filter: blur(3px); }
+  }
+
   .gradient-top, .gradient-bottom {
     position: absolute;
     left: 0; right: 0;
     height: 35%;
     pointer-events: none;
+    z-index: 1;
   }
   .gradient-top {
     top: 0;
@@ -38,7 +118,23 @@
     bottom: 0;
     background: linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.4) 40%, transparent 100%);
   }
-  
+
+  .kicker {
+    position: absolute;
+    top: 42px;
+    left: var(--slide-left);
+    z-index: 16;
+    max-width: 70%;
+    font-family: "D-DIN Condensed", "Arial Narrow", sans-serif;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    text-shadow: 0 2px 10px rgba(0,0,0,0.65);
+    opacity: 0;
+    animation: fadeInContent 1.2s ease 0.3s forwards;
+  }
+
   .bug {
     position: absolute;
     right: 48px;
@@ -55,55 +151,63 @@
     z-index: 20;
   }
   .bug img {
-    width: 70%;
-    height: 70%;
-    object-fit: contain;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
-  /* Fallback text logo if no image */
   .bug .fallback {
     font-weight: 700;
     font-size: 28px;
     color: #2c5f2d;
     letter-spacing: -1px;
   }
-  
+
   @keyframes dropBug {
     0%   { top: 40px; }
     100% { top: calc(100% - 130px); }
   }
-  
+
   .content {
     position: relative;
     z-index: 15;
-    max-width: 900px;
-    width: 85%;
+    width: calc(100% - var(--slide-left) - 160px);
+    max-width: 1100px;
+    margin-left: var(--slide-left);
     text-align: left;
-    padding: 40px 60px;
+    padding: 12px 0;
+    font-size: 1.8rem;
     opacity: 0;
-    animation: fadeInContent 1.2s ease 0.8s forwards;
+    animation: fadeInContent 1.2s ease 2.5s forwards;
+    --content-shadow:
+      0 0 2px rgba(0,0,0,0.95),
+      0 0 6px rgba(0,0,0,0.85),
+      0 0 18px rgba(0,0,0,0.65);
+    text-shadow: var(--content-shadow);
   }
-  .slide.active .content {
-    /* restart animation on slide change if needed */
-  }
-  
+
   .content h1 {
-    font-size: 3.2rem;
+    font-size: 2.2em;
     font-weight: 700;
     line-height: 1.15;
-    margin-bottom: 1.5rem;
-    text-shadow: 0 2px 12px rgba(0,0,0,0.6);
-    letter-spacing: -0.5px;
+    margin-bottom: 0.2em;
+    letter-spacing: -0.02em;
+  }
+  .content .subtitle {
+    font-size: 0.98em;
+    font-weight: 500;
+    line-height: 1.35;
+    margin-bottom: 0.75em;
   }
   .content ul {
     list-style: none;
-    font-size: 1.55rem;
-    line-height: 1.6;
+    font-size: 1em;
+    line-height: 1.35;
+    margin-top: 0.3em;
   }
   .content li {
-    margin-bottom: 0.7rem;
-    padding-left: 1.4rem;
+    margin-bottom: 0.28em;
+    padding-left: 1.15em;
     position: relative;
-    text-shadow: 0 1px 6px rgba(0,0,0,0.5);
   }
   .content li::before {
     content: "•";
@@ -112,12 +216,103 @@
     color: #a8d5a2;
     font-weight: bold;
   }
-  
+
+  .slide-video { padding: 0; }
+  .slide-video video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: #000;
+  }
+
+  /* Lower third. --lt-x is how far the logo still has to travel.
+     The bar is clipped by the same distance, so the logo wipes it on. */
+  @property --lt-x {
+    syntax: "<length>";
+    inherits: true;
+    initial-value: 100vw;
+  }
+  .lower-third {
+    --lt-size: 15.8vh;
+    --lt-safe: 5vh;
+    --lt-bar-h: 13.6vh;
+    --lt-right: 21.5vw;
+    --lt-x: 100vw;
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    pointer-events: none;
+    opacity: 1;
+  }
+  .lower-third.is-on {
+    --lt-x: 0px;
+    transition: --lt-x 1500ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+  .lower-third.is-out {
+    opacity: 0;
+    transition: --lt-x 1500ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity 2000ms linear;
+  }
+  .lt-logo {
+    position: absolute;
+    left: calc(var(--lt-safe) + var(--lt-x));
+    bottom: var(--lt-safe);
+    width: var(--lt-size);
+    height: var(--lt-size);
+    z-index: 2;
+    filter: drop-shadow(0 8px 18px rgba(0,0,0,0.35));
+  }
+  .lt-window {
+    position: absolute;
+    left: calc(var(--lt-safe) + var(--lt-size) * 0.5);
+    right: var(--lt-right);
+    bottom: calc(var(--lt-safe) + (var(--lt-size) - var(--lt-bar-h)) / 2);
+    height: var(--lt-bar-h);
+    overflow: hidden;
+    border-radius: 0 3.4vh 3.4vh 0;
+    clip-path: inset(0 0 0 var(--lt-x) round 0 3.4vh 3.4vh 0);
+    filter: drop-shadow(0 8px 18px rgba(0,0,0,0.28));
+  }
+  .lt-bar {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: calc(100vw - var(--lt-safe) - var(--lt-right) - var(--lt-size) * 0.5);
+    display: flex;
+    flex-direction: column;
+  }
+  .lt-name, .lt-title {
+    display: flex;
+    align-items: center;
+    min-height: 0;
+    padding: 0 1.4em 0 calc(var(--lt-size) * 0.5 + 1.4vh);
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    font-family: "Olivette", sans-serif;
+  }
+  .lt-name {
+    flex: 1.29;
+    background: #3c4b29;
+    font-weight: 700;
+    font-size: 4.45vh;
+    letter-spacing: -0.02em;
+  }
+  .lt-title {
+    flex: 1;
+    background: rgba(60, 75, 41, 0.5);
+    font-weight: 400;
+    font-size: 3.15vh;
+    color: rgba(255, 255, 255, 0.94);
+  }
+
   @keyframes fadeInContent {
     from { opacity: 0; transform: translateY(12px); }
     to   { opacity: 1; transform: translateY(0); }
   }
-  
+
   .controls {
     position: fixed;
     bottom: 16px;
@@ -140,7 +335,7 @@
     font-size: 14px;
   }
   .controls button:hover { background: rgba(0,0,0,0.8); }
-  
+
   .progress {
     position: fixed;
     top: 0; left: 0;
@@ -153,9 +348,9 @@
 </head>
 <body>
   <div class="progress" id="progress"></div>
-  
+
   <!-- SLIDES_PLACEHOLDER -->
-  
+
   <div class="controls">
     <button onclick="prevSlide()">← Prev</button>
     <button onclick="nextSlide()">Next →</button>
@@ -163,37 +358,284 @@
   </div>
 
 <script>
-  const slides = document.querySelectorAll('.slide');
+  const deck = /* DECK_CONFIG */;
+  const params = new URLSearchParams(location.search);
+  if (params.has('seed')) deck.seed = Number(params.get('seed'));
+
+  let playOrder = [];
   let current = 0;
+  let advanceTimer = null;
   const progress = document.getElementById('progress');
-  
-  function showSlide(n) {
-    slides.forEach((s, i) => s.classList.toggle('active', i === n));
-    current = n;
-    progress.style.width = ((n + 1) / slides.length * 100) + '%';
-    
-    // Restart content animation
-    const content = slides[n].querySelector('.content');
-    if (content) {
-      content.style.animation = 'none';
-      content.offsetHeight; // reflow
-      content.style.animation = null;
+  const player = new Audio();
+  player.loop = true;
+  player.preload = 'auto';
+  let fadeToken = 0;
+  let currentSrc = null;
+  let heldTime = 0;
+  let heldForVideo = false;
+
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a |= 0;
+      a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function makeRng() {
+    if (deck.seed == null || Number.isNaN(deck.seed)) {
+      const buf = new Uint32Array(1);
+      crypto.getRandomValues(buf);
+      return mulberry32(buf[0]);
     }
-    
-    // Optionally restart bug animation
-    const bug = slides[n].querySelector('.bug');
-    if (bug) {
-      bug.style.animation = 'none';
-      bug.offsetHeight;
-      bug.style.animation = null;
+    return mulberry32(deck.seed);
+  }
+
+  function sample(rng, items, n) {
+    const copy = items.slice();
+    const out = [];
+    for (let i = 0; i < n && copy.length; i++) {
+      const j = Math.floor(rng() * copy.length);
+      out.push(copy.splice(j, 1)[0]);
+    }
+    return out;
+  }
+
+  function buildPlayOrder() {
+    const nodes = [...document.querySelectorAll('.slide')];
+    const fillers = nodes.filter(s => s.dataset.deck === 'filler');
+    const groups = (deck.sections || []).map(() => []);
+    nodes.forEach(slide => {
+      if (slide.dataset.deck === 'filler') return;
+      const index = Number(slide.dataset.sectionIndex || 0);
+      if (!groups[index]) groups[index] = [];
+      groups[index].push(slide);
+    });
+    const rng = makeRng();
+    const order = [];
+    groups.forEach((slides, index) => {
+      const spec = (deck.sections && deck.sections[index]) || { insert: 1 };
+      const units = [];
+      slides.forEach(slide => {
+        if (slide.dataset.glued === '1' && units.length) units[units.length - 1].push(slide);
+        else units.push([slide]);
+      });
+      const gaps = [];
+      units.forEach((unit, unitIndex) => {
+        const anchored = unitIndex === 0 && unit[0].dataset.glued === '1';
+        if (!anchored) gaps.push(unitIndex);
+      });
+      const wanted = spec.insert == null ? 1 : spec.insert;
+      const count = Math.min(wanted, gaps.length, fillers.length);
+      const chosenGaps = sample(rng, gaps, count).sort((a, b) => a - b);
+      const chosenFillers = sample(rng, fillers, count);
+      const placed = new Map();
+      chosenGaps.forEach((gap, i) => placed.set(gap, chosenFillers[i]));
+      units.forEach((unit, unitIndex) => {
+        if (placed.has(unitIndex)) order.push({ slide: placed.get(unitIndex), sectionIndex: index });
+        unit.forEach(slide => order.push({ slide: slide, sectionIndex: index }));
+      });
+    });
+    return order;
+  }
+
+  function resolveAudio(sectionIndex) {
+    let track = deck.audio || null;
+    const sections = deck.sections || [];
+    const last = sectionIndex == null ? -1 : sectionIndex;
+    for (let i = 0; i <= last; i++) {
+      const audio = sections[i] && sections[i].audio;
+      if (audio != null && audio !== '') track = audio;
+    }
+    if (!track || track === 'stop') return null;
+    return track;
+  }
+
+  function fadeVolume(target, done) {
+    const token = ++fadeToken;
+    const from = player.volume;
+    const ms = deck.fadeMs == null ? 2000 : deck.fadeMs;
+    const started = performance.now();
+    function step(now) {
+      if (token !== fadeToken) return;
+      const progress = ms <= 0 ? 1 : Math.min(1, (now - started) / ms);
+      const next = from + (target - from) * progress;
+      player.volume = Math.min(1, Math.max(0, next));
+      if (progress < 1) requestAnimationFrame(step);
+      else if (done) done();
+    }
+    requestAnimationFrame(step);
+  }
+
+  function settleAudio(slide, sectionIndex) {
+    const track = resolveAudio(sectionIndex);
+    if (slide.dataset.kind === 'video' || !track) {
+      heldForVideo = slide.dataset.kind === 'video' && !!currentSrc;
+      fadeVolume(0, () => {
+        if (player.volume > 0.01) return;
+        if (!player.paused) heldTime = player.currentTime;
+        player.pause();
+        if (!track) {
+          currentSrc = null;
+          heldTime = 0;
+          heldForVideo = false;
+        }
+      });
+      return;
+    }
+    const same = currentSrc === track;
+    if (!same) {
+      player.src = track;
+      currentSrc = track;
+      player.currentTime = 0;
+      heldTime = 0;
+    } else if (heldForVideo) {
+      player.currentTime = heldTime;
+    }
+    heldForVideo = false;
+    player.play().catch(() => {});
+    if (!same || player.volume < 0.99) fadeVolume(1);
+  }
+
+  function fitContent(slide) {
+    const box = slide.querySelector('.content');
+    if (!box) return;
+    box.style.fontSize = '';
+    const max = parseFloat(getComputedStyle(box).fontSize);
+    const min = max * 0.62;
+    const cs = getComputedStyle(slide);
+    const limitH = slide.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    const fits = (size) => {
+      box.style.fontSize = size + 'px';
+      return box.scrollHeight <= limitH + 1 && box.scrollWidth <= box.clientWidth + 1;
+    };
+    if (fits(max)) return;
+    let lo = min;
+    let hi = max;
+    let best = min;
+    for (let i = 0; i < 10; i++) {
+      const mid = (lo + hi) / 2;
+      if (fits(mid)) { best = mid; lo = mid; }
+      else hi = mid;
+    }
+    box.style.fontSize = best + 'px';
+  }
+
+  function indexFromHash() {
+    const match = /^#(\d+)$/.exec(location.hash);
+    if (!match) return 0;
+    const n = parseInt(match[1], 10) - 1;
+    if (n < 0 || n >= playOrder.length) return 0;
+    return n;
+  }
+
+  function writeHash(n) {
+    const next = '#' + (n + 1);
+    if (location.hash === next) return;
+    history.replaceState(null, '', next);
+  }
+
+  function restart(node, selector) {
+    const el = node.querySelector(selector);
+    if (!el) return;
+    el.style.animation = 'none';
+    el.offsetHeight;
+    el.style.animation = null;
+  }
+
+  let lowerTimers = [];
+
+  function clearLowerThird() {
+    lowerTimers.forEach(clearTimeout);
+    lowerTimers = [];
+    document.querySelectorAll('.lower-third').forEach(el => {
+      el.style.transition = 'none';
+      el.classList.remove('is-on', 'is-out');
+      void el.offsetWidth;
+      el.style.transition = '';
+    });
+  }
+
+  function startLowerThird(slide) {
+    clearLowerThird();
+    const el = slide.querySelector('.lower-third');
+    if (!el) return;
+    const buildIn = Number(el.dataset.buildIn);
+    const buildOut = Number(el.dataset.buildOut);
+    const stillHere = () => playOrder[current] && playOrder[current].slide === slide;
+    lowerTimers.push(setTimeout(() => {
+      if (!stillHere()) return;
+      el.classList.add('is-on');
+    }, buildIn));
+    lowerTimers.push(setTimeout(() => {
+      if (!stillHere()) return;
+      el.classList.add('is-out');
+    }, buildOut));
+  }
+
+  function armTimer(slide) {
+    clearTimeout(advanceTimer);
+    if (!deck.autoAdvance) return;
+    if (slide.dataset.kind === 'video') return;
+    if (!deck.loop && current >= playOrder.length - 1) return;
+    advanceTimer = setTimeout(nextSlide, deck.autoAdvance);
+  }
+
+  function showSlide(n) {
+    if (!playOrder.length) return;
+    document.querySelectorAll('.slide').forEach(s => {
+      s.classList.remove('active');
+      s.setAttribute('aria-hidden', 'true');
+    });
+    document.querySelectorAll('video').forEach(video => {
+      video.pause();
+    });
+    const item = playOrder[n];
+    const slide = item.slide;
+    slide.classList.add('active');
+    slide.removeAttribute('aria-hidden');
+    current = n;
+    progress.style.width = ((n + 1) / playOrder.length * 100) + '%';
+    restart(slide, '.content');
+    restart(slide, '.kicker');
+    restart(slide, '.bug');
+    fitContent(slide);
+    writeHash(n);
+    settleAudio(slide, item.sectionIndex);
+    armTimer(slide);
+    if (slide.dataset.kind !== 'video') clearLowerThird();
+    if (slide.dataset.kind === 'video') {
+      startLowerThird(slide);
+      const video = slide.querySelector('video');
+      if (video) {
+        // A missing file often never fires `error` until the browser finishes
+        // the failed fetch. If no frame has arrived, treat the slide as the
+        // black hold and move on. A real file clears this once it can play.
+        advanceTimer = setTimeout(() => {
+          if (!playOrder[current] || playOrder[current].slide !== slide) return;
+          if (video.readyState >= 2) return;
+          nextSlide();
+        }, 1500);
+        video.addEventListener('loadeddata', () => {
+          if (playOrder[current] && playOrder[current].slide === slide) clearTimeout(advanceTimer);
+        }, { once: true });
+        video.load();
+        try { video.currentTime = 0; } catch (err) {}
+        video.play().catch(() => {});
+      }
     }
   }
-  
+
   function nextSlide() {
-    if (current < slides.length - 1) showSlide(current + 1);
+    if (current < playOrder.length - 1) showSlide(current + 1);
+    else if (deck.loop && playOrder.length) showSlide(0);
   }
   function prevSlide() {
     if (current > 0) showSlide(current - 1);
+    else if (deck.loop && playOrder.length) showSlide(playOrder.length - 1);
   }
   function toggleFullscreen() {
     if (!document.fullscreenElement) {
@@ -202,16 +644,30 @@
       document.exitFullscreen();
     }
   }
-  
+
+  document.querySelectorAll('.slide-video video').forEach(video => {
+    const slide = video.closest('.slide');
+    video.addEventListener('ended', () => {
+      if (playOrder[current] && playOrder[current].slide === slide) nextSlide();
+    });
+    video.addEventListener('error', () => {
+      if (!playOrder[current] || playOrder[current].slide !== slide) return;
+      clearTimeout(advanceTimer);
+      advanceTimer = setTimeout(() => {
+        if (playOrder[current] && playOrder[current].slide === slide) nextSlide();
+      }, 1000);
+    });
+  });
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); nextSlide(); }
     if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prevSlide(); }
     if (e.key === 'f' || e.key === 'F') toggleFullscreen();
     if (e.key === 'Home') showSlide(0);
-    if (e.key === 'End') showSlide(slides.length - 1);
+    if (e.key === 'End') showSlide(playOrder.length - 1);
+    unlock();
   });
-  
-  // Touch swipe support
+
   let touchStartX = 0;
   document.addEventListener('touchstart', e => { touchStartX = e.changedTouches[0].screenX; });
   document.addEventListener('touchend', e => {
@@ -219,9 +675,29 @@
     if (Math.abs(diff) > 50) {
       if (diff > 0) nextSlide(); else prevSlide();
     }
+    unlock();
   });
-  
-  showSlide(0);
+  document.addEventListener('pointerdown', unlock);
+
+  function unlock() {
+    const slide = playOrder[current] && playOrder[current].slide;
+    if (!slide) return;
+    const video = slide.querySelector('video');
+    if (video) video.play().catch(() => {});
+    if (player.src) player.play().catch(() => {});
+  }
+
+  playOrder = buildPlayOrder();
+  showSlide(indexFromHash());
+  window.addEventListener('hashchange', () => {
+    const n = indexFromHash();
+    if (n !== current) showSlide(n);
+    else writeHash(n);
+  });
+  window.addEventListener('resize', () => {
+    const slide = playOrder[current] && playOrder[current].slide;
+    if (slide) fitContent(slide);
+  });
 </script>
 </body>
 </html>
