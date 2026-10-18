@@ -26,7 +26,7 @@ my $cue = {id => 'test', label => 'Test', theme => 'little-hills', variant => 'r
     font => 'quicksand', line1 => '<script>alert(1)</script>', line2 => 'A&B', holdMs => 5000};
 $t->post_ok('/api/v1/cues' => json => $cue)->status_is(201)->json_is('/line1', $cue->{line1});
 ok -f "$temp/cues.json", 'cue file persisted';
-is scalar @{decode_json(path("$temp/cues.json")->slurp)}, 3, 'saved array includes existing examples';
+is scalar @{decode_json(path("$temp/cues.json")->slurp)}, 4, 'saved array includes existing examples';
 $t->post_ok('/api/v1/cues' => json => $cue)->status_is(409);
 $t->post_ok('/api/v1/cues' => json => {%$cue, id => 'invalid', holdMs => -1})->status_is(400);
 $t->post_ok('/api/v1/cues' => json => {%$cue, id => 'invalid', theme => '../x'})->status_is(400);
@@ -52,6 +52,6 @@ $t->delete_ok('/api/v1/cues/test')->status_is(404);
 $t->post_ok('/api/v1/cues' => json => $cue)->status_is(201);
 $t->post_ok('/api/v1/outputs/lower-third/commands' => json => {action => 'show', cueId => 'test'})->status_is(200);
 my $restarted = Test::Mojo->new(Mojo::Server->new->load_app("$FindBin::Bin/../script/display-server"));
-$restarted->get_ok('/api/v1/cues')->status_is(200)->json_is('/2/id', 'test');
+$restarted->get_ok('/api/v1/cues')->status_is(200)->json_is('/3/id', 'test');
 $restarted->get_ok('/api/v1/outputs/lower-third/state')->json_is('/phase', 'hidden');
 done_testing;

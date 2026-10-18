@@ -1,0 +1,37 @@
+{
+  "id": "little-hills-social",
+  "name": "Little Hills Social Media",
+  "version": 1,
+  "variants": [
+    "full-width"
+  ],
+  "fonts": [
+    "quicksand",
+    "serene-sands"
+  ],
+  "fields": [
+    {
+      "id": "line1",
+      "label": "Heading"
+    },
+    {
+      "id": "facebook",
+      "label": "Facebook"
+    },
+    {
+      "id": "x",
+      "label": "X"
+    },
+    {
+      "id": "mastodon",
+      "label": "Mastodon"
+    }
+  ],
+  "defaults": {
+    "variant": "full-width",
+    "font": "quicksand",
+    "holdMs": 10000
+  },
+  "enterMs": 1200,
+  "exitMs": 1200
+}

@@ -1,0 +1,6 @@
+@import url('../little-hills/style.css');
+
+.lh-stage.social .lh-line2 { display: none; }
+.lh-socials { display: flex; align-items: center; gap: .7em; height: 95px; white-space: nowrap; font-size: 44px; font-weight: 400; color: #465c2d; }
+.lh-social-account { display: inline-flex; align-items: center; gap: .22em; flex-shrink: 0; }
+.lh-social-account img { width: 1em; height: 1em; flex-shrink: 0; }

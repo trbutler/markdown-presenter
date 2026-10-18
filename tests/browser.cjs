@@ -81,6 +81,22 @@ const os = require('node:os');
     await command('clear');
     await output.waitForFunction(() => getComputedStyle(document.querySelector('#graphic')).visibility === 'hidden');
 
+    // Full social handles and icons fit inside the full-width copy area.
+    for (const font of ['quicksand', 'serene-sands']) {
+      const social = (await (await fetch(`${base}/api/v1/cues`)).json()).find(cue => cue.id === 'social-media');
+      await api('cues/social-media', {...social, font}, 'PUT');
+      await command('show', 'social-media');
+      await output.locator('.lh-social-account').first().waitFor({state: 'visible'});
+      await output.waitForTimeout(1400);
+      assert.deepEqual(await output.locator('.lh-social-account span').allTextContents(),
+        ['LittleHillsChurch', '@LittleHillsC', '@LittleHillsChurch@FaithTree.social']);
+      assert.equal(await output.locator('.lh-social-account img').count(), 3);
+      assert(await output.locator('.lh-socials').evaluate(row =>
+        row.scrollWidth <= row.clientWidth && [...row.querySelectorAll('img')].every(img => img.complete && img.naturalWidth > 0)));
+      await output.screenshot({path: path.join(repo, `test-results/little-hills-social-${font}.png`), omitBackground: true});
+    }
+    await command('clear');
+
     const tablet = await browser.newPage({viewport: {width: 1024, height: 900}, hasTouch: true});
     tablet.on('pageerror', error => errors.push(error.message));
     await tablet.goto(base);

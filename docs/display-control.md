@@ -23,8 +23,8 @@ One server process owns the output state; do not run multiple workers.
 - Operator page: `http://127.0.0.1:3000/`
 - OBS output: `http://127.0.0.1:3000/output/lower-third`
 
-The initial cue buttons are Timothy Butler / Pastor and Need Prayer? /
-tim@littlehills.church. Add or edit cues in the browser. Saving creates
+The initial cue buttons are Timothy Butler / Pastor, Need Prayer? /
+tim@littlehills.church, and Social Media. Add or edit cues in the browser. Saving creates
 `var/cues.json`; set `PRESENTER_CUES` to choose another file. The file contains a
 JSON array matching `config/cues.example.json`. Stop the server before editing
 that file manually. Writes from the editor replace the file atomically. Keep
@@ -78,6 +78,15 @@ when interrupted. Full-width retains its 1.2-second entry and exit. The original
 1.2-second regular animation with the upper bar exiting to the right is preserved
 as the **Little Hills (alternate motion)** theme, under
 `themes/little-hills-directional/`. No default cue selects it.
+
+The **Little Hills Social Media** theme (`themes/little-hills-social/`) shares
+full-width motion, logo, and fonts with Little Hills. Its editable heading and
+Facebook, X, and Mastodon fields are separate from the contact banner. Each
+account has a locally served icon; empty account fields are omitted. The row
+fits the full handles on one line, reducing text size if needed. The seed cue
+`social-media` holds for 10 seconds and includes the full Mastodon server name.
+The Companion adapter discovers new saved cues on its next 15-second refresh;
+drag its Social Media preset onto a spare button to get trigger and feedback.
 
 The server owns the timeline and broadcasts snapshots
 with server timestamps and revisions over Server-Sent Events (SSE). Clients

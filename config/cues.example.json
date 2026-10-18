@@ -1,4 +1,34 @@
 [
-  {"id":"timothy", "label":"Timothy Butler", "theme":"little-hills", "variant":"regular", "font":"quicksand", "line1":"Timothy Butler", "line2":"Pastor", "holdMs":10000},
-  {"id":"prayer", "label":"Need Prayer?", "theme":"little-hills", "variant":"full-width", "font":"quicksand", "line1":"Need Prayer?", "line2":"tim@littlehills.church", "holdMs":10000}
+  {
+    "id": "timothy",
+    "label": "Timothy Butler",
+    "theme": "little-hills",
+    "variant": "regular",
+    "font": "quicksand",
+    "line1": "Timothy Butler",
+    "line2": "Pastor",
+    "holdMs": 10000
+  },
+  {
+    "id": "prayer",
+    "label": "Need Prayer?",
+    "theme": "little-hills",
+    "variant": "full-width",
+    "font": "quicksand",
+    "line1": "Need Prayer?",
+    "line2": "tim@littlehills.church",
+    "holdMs": 10000
+  },
+  {
+    "id": "social-media",
+    "label": "Social Media",
+    "theme": "little-hills-social",
+    "variant": "full-width",
+    "font": "quicksand",
+    "line1": "Follow Us on Social Media",
+    "facebook": "LittleHillsChurch",
+    "x": "@LittleHillsC",
+    "mastodon": "@LittleHillsChurch@FaithTree.social",
+    "holdMs": 10000
+  }
 ]
