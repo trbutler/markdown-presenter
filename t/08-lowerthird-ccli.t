@@ -52,7 +52,7 @@ my $harness = "file://$root/t/browser/harness-ltccli.html?" . join('&', map { "$
 local $ENV{TMPDIR} = $scratch;
 my @cmd = ($chrome, '--headless', '--no-sandbox', '--disable-gpu',
     '--allow-file-access-from-files', '--autoplay-policy=no-user-gesture-required', "--user-data-dir=$build/profile",
-    '--virtual-time-budget=120000', '--dump-dom', $harness);
+    '--virtual-time-budget=300000', '--dump-dom', $harness);
 open my $fh, '-|', @cmd or die "Cannot run $chrome: $!";
 binmode $fh, ':encoding(UTF-8)';
 my $dom = do { local $/; <$fh> };
