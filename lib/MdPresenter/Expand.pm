@@ -22,6 +22,8 @@ our @EXPORT_OK = qw(expandFile resolveInclude);
 
 our $maxDepth = 16;
 
+# Optional lineOrigins receives [relative file, source line] per expanded
+# line, including generated scripture lines, for downstream diagnostics.
 sub expandFile {
     my ($path, %opt) = @_;
     my $fileReal = realpath($path);
@@ -36,7 +38,9 @@ sub expandFile {
         scripture          => $opt{scripture} || \&MdPresenter::Scripture::scriptureMarkdown,
         scriptureOpt       => $opt{scriptureOpt} || {},
     );
-    return expandAt($fileReal, \%state);
+    my ($text, $origins) = expandAt($fileReal, \%state);
+    @{ $opt{lineOrigins} } = @$origins if $opt{lineOrigins};
+    return $text;
 }
 
 sub displayName {
@@ -64,7 +68,7 @@ sub expandAt {
 
     push @$stack, $fileReal;
     my $here = displayName($fileReal, $state);
-    my @out;
+    my (@out, @origins);
     my $lineNo = 0;
     foreach my $line (split /\n/, $text, -1) {
         $lineNo++;
@@ -72,9 +76,11 @@ sub expandAt {
             my $spec = defined $1 ? $1 : '';
             my $target = eval { resolveInclude($spec, dirname($fileReal), $state->{root}) };
             die "$here:$lineNo: $@" if $@;
-            my $body = expandAt($target, $state, "$here:$lineNo");
+            my ($body, $bodyOrigins) = expandAt($target, $state, "$here:$lineNo");
             $body =~ s/\n+$//;
             push @out, $body;
+            my $count = 1 + ($body =~ tr/\n/\n/);
+            push @origins, map { $bodyOrigins->[$_] // [ $here, $lineNo ] } 0 .. $count - 1;
         } elsif ($line =~ /^\s*!scripture(?:\s+(.*?))?\s*$/) {
             my $ref = defined $1 ? $1 : '';
             die "$here:$lineNo: !scripture needs a reference, e.g. !scripture John 3:16-18 (KJV)\n"
@@ -85,15 +91,18 @@ sub expandAt {
             die "$here:$lineNo: $@" if $@;
             $md =~ s/\n+$//;
             push @out, $md;
+            my $count = 1 + ($md =~ tr/\n/\n/);
+            push @origins, map { [ $here, $lineNo ] } 1 .. $count;
         } else {
             if ($line =~ /^\s*\/\/\s*translation\s*:\s*(\S+)\s*$/) {
                 $state->{defaultTranslation} = $1;
             }
             push @out, $line;
+            push @origins, [ $here, $lineNo ];
         }
     }
     pop @$stack;
-    return join "\n", @out;
+    return (join("\n", @out), \@origins);
 }
 
 # Returns the real path of an include, or dies saying why it is refused.

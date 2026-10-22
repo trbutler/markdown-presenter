@@ -17,7 +17,8 @@ my $input  = shift @ARGV or die "Usage: $0 <markdown-file> [output.html]\n";
 my $output = shift @ARGV;
 
 # !include and !scripture lines are expanded here, before the deck is split.
-my $md = expandFile($input);
+my @lineOrigins;
+my $md = expandFile($input, lineOrigins => \@lineOrigins);
 $md =~ s/\r\n/\n/g;
 $md =~ s/\r/\n/g;
 
@@ -26,7 +27,7 @@ open my $tfh, '<:utf8', $template_path or die "Cannot open $template_path: $!";
 my $template = do { local $/; <$tfh> };
 close $tfh;
 
-my @blocks = parse_blocks($md);
+my @blocks = parse_blocks($md, \@lineOrigins);
 my $model  = build_model(@blocks);
 my $html   = render($template, $model);
 
@@ -42,15 +43,17 @@ if ($output) {
 }
 
 sub parse_blocks {
-    my ($text) = @_;
+    my ($text, $origins) = @_;
     my @blocks;
+    my $lineNo = 0;
     my @lines;
     foreach my $line (split /\n/, $text) {
+        my $origin = $origins->[$lineNo++];
         if ($line =~ /^---\s*$/) {
             push @blocks, [@lines] if @lines;
             @lines = ();
         } else {
-            push @lines, $line;
+            push @lines, [ $line, $origin ];
         }
     }
     push @blocks, [@lines] if @lines;
@@ -59,12 +62,14 @@ sub parse_blocks {
 
 sub parse_slide {
     my (@lines) = @_;
-    my %dir;
+    my (%dir, %dirSource);
+    my $song;
     my ($kicker, $title, $bg, $video) = ('', '', '', '');
     my (@bullets, @subtitle);
     my (@notes, $inNotes);
 
-    foreach my $line (@lines) {
+    foreach my $entry (@lines) {
+        my ($line, $origin) = @$entry;
         # Speaker notes: "Note:" (or "Notes:") at the start of a line, or
         # <!-- notes -->, runs to the end of the slide or to <!-- /notes -->.
         if ($inNotes) {
@@ -80,10 +85,19 @@ sub parse_slide {
             push @notes, $1 if length $1;
             next;
         }
+        if ($line =~ /^\s*\/\/\s*song(?:\s|:|$)/
+                && $line !~ /^\s*\/\/\s*song(?:\s*:\s*.*?)?\s*$/) {
+            warn join(':', @$origin) . ": Malformed // song: use Title | Authors | Copyright | CCLI Song # n\n";
+            $dir{song} = undef;
+            $song = undef;
+            next;
+        }
         if ($line =~ /^\s*\/\/\s*([A-Za-z][\w-]*)(?:\s*:\s*(.*?))?\s*$/) {
             my ($key, $value) = ($1, $2);
             $value =~ s/\s+$// if defined $value;
             $dir{$key} = $value;
+            $dirSource{$key} = join(':', @$origin);
+            $song = parseSong($value, $dirSource{$key}) if $key eq 'song';
         } elsif ($line =~ /^\s*bg:\s*(\S+)\s*$/ || $line =~ /^\s*!\[bg\]\((.+?)\)\s*$/) {
             $bg = $1;
         } elsif ($line =~ /^\s*##\s+(.+?)\s*$/) {
@@ -108,6 +122,8 @@ sub parse_slide {
 
     return {
         dir      => \%dir,
+        dirSource => \%dirSource,
+        song     => $song,
         kicker   => $kicker,
         title    => $title,
         subtitle => join("\n", @subtitle),
@@ -134,6 +150,8 @@ sub build_model {
     my $current;
     my $mode = 'main';
     my $seen_section = 0;
+    my ($ccliLicense, $currentSong);
+    my @songs;
 
     my $new_section = sub {
         my ($name) = @_;
@@ -150,8 +168,25 @@ sub build_model {
         my $dir = $slide->{dir};
 
         foreach my $unknown (sort keys %$dir) {
-            next if $unknown =~ /^(seed|autoAdvance|loop|fade|audio|type|section|insert|position|video|backdrop|name|title|buildIn|buildOut|translation|countdown|countdownEnd|cycle|midi|midiOut)$/;
+            next if $unknown =~ /^(seed|autoAdvance|loop|fade|audio|type|section|insert|position|video|backdrop|name|title|buildIn|buildOut|translation|countdown|countdownEnd|cycle|midi|midiOut|ccli|song|songEnd)$/;
             warn "Unknown directive //$unknown\n";
+        }
+
+        if (exists $dir->{ccli}) {
+            my $value = $dir->{ccli} // '';
+            if ($value =~ /^\d+$/) {
+                $ccliLicense = $value;
+            } else {
+                warn "$slide->{dirSource}{ccli}: // ccli needs a licence number; notices disabled\n";
+                undef $ccliLicense;
+            }
+        }
+        # A section, a new song, an explicit end or the filler pool ends the
+        # previous song. Metadata-only song blocks attach to following slides.
+        undef $currentSong if grep { exists $dir->{$_} } qw(section song songEnd type);
+        if ($slide->{song}) {
+            $currentSong = { fields => $slide->{song}, slides => [] };
+            push @songs, $currentSong;
         }
 
         $deck{seed} = int($dir->{seed}) if exists $dir->{seed} && defined $dir->{seed} && $dir->{seed} =~ /^-?\d+$/;
@@ -239,6 +274,17 @@ sub build_model {
         if ($slide->{has}) {
             $current ||= $new_section->('');
             push @{ $current->{slides} }, $slide;
+            push @{ $currentSong->{slides} }, $slide if $currentSong;
+        }
+    }
+
+    if (defined $ccliLicense) {
+        foreach my $song (@songs) {
+            my $slides = $song->{slides};
+            next unless @$slides;
+            my $notice = join(' | ', @{ $song->{fields} }) . "\nCCLI License # $ccliLicense";
+            $slides->[0]{ccliNotice} = $notice;
+            $slides->[-1]{ccliNotice} = $notice;
         }
     }
 
@@ -339,7 +385,7 @@ sub slide_html {
         $src =~ s/ /%20/g;
         push @attrs, 'data-video="' . $src . '"';
         my $attr = join ' ', @attrs;
-        my $lower = lower_third_html($slide) . notesHtml($slide);
+        my $lower = lower_third_html($slide) . ccliNoticeHtml($slide) . notesHtml($slide);
         my $blur = defined $slide->{dir}{backdrop} && $slide->{dir}{backdrop} eq 'blur';
         my $videos = $blur
             ? qq{    <canvas class="video-fill" aria-hidden="true"></canvas>\n}
@@ -374,7 +420,7 @@ HTML
             . join('', map { '        <li>' . esc($_) . "</li>\n" } @{ $slide->{bullets} })
             . "      </ul>\n";
     }
-    my $notes = notesHtml($slide);
+    my $notes = ccliNoticeHtml($slide) . notesHtml($slide);
     my $attr = join ' ', @attrs;
     return <<"HTML";
   <div $attr>
@@ -388,6 +434,26 @@ $kicker    <div class="content">
 $title$subtitle$bullets    </div>
 $notes  </div>
 HTML
+}
+
+# Up to four positional fields; empty optional fields are omitted, never
+# supplied from defaults. A title is needed to identify the song.
+sub parseSong {
+    my ($value, $where) = @_;
+    my @fields = split /\|/, ($value // ''), -1;
+    s/^\s+|\s+$//g for @fields;
+    if (!@fields || !length($fields[0]) || @fields > 4) {
+        warn "$where: Malformed // song: use Title | Authors | Copyright | CCLI Song # n\n";
+        return undef;
+    }
+    return [ grep { length } @fields ];
+}
+
+sub ccliNoticeHtml {
+    my ($slide) = @_;
+    return '' unless defined $slide->{ccliNotice};
+    my $text = join('<br>', map { esc($_) } split /\n/, $slide->{ccliNotice});
+    return qq{    <div class="ccli-notice" style="font-size: small;">$text</div>\n};
 }
 
 sub lower_third_html {
