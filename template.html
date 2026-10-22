@@ -692,6 +692,7 @@
   // Windows of the same deck follow each other: open ?view=notes on the
   // laptop and the plain deck on the projector, and either one drives.
   const peerId = Math.random().toString(36).slice(2);
+  let joining = true;
   // Inside the app Swift relays instead, so the channel stays closed there.
   let channel = null;
   if (!nativeBridge) {
@@ -709,6 +710,9 @@
     channel.onmessage = (event) => {
       const msg = event.data || {};
       if (msg.from === peerId) return;
+      // A reply to a hello is only for a window still waiting to join:
+      // one that has moved since must not be pulled back by a late reply.
+      if (msg.type === 'show' && msg.reply && !joining) return;
       if (msg.type === 'show') {
         const node = deckSlides()[msg.node];
         let n = msg.n;
@@ -724,7 +728,7 @@
       } else if (msg.type === 'timer') {
         if (typeof msg.start === 'number') timerStart = msg.start;
       } else if (msg.type === 'hello') {
-        post({ type: 'show', n: current, node: nodeIndex(playOrder[current] && playOrder[current].slide), black: blacked, timerStart: timerStart });
+        post({ type: 'show', reply: true, n: current, node: nodeIndex(playOrder[current] && playOrder[current].slide), black: blacked, timerStart: timerStart });
       }
     };
   }
@@ -1006,6 +1010,7 @@
     markService();
     tick();
     if (!fromRemote) {
+      joining = false;
       post({ type: 'show', n: n, node: nodeIndex(playOrder[n].slide), black: blacked });
     }
   }
