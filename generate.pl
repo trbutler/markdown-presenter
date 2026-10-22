@@ -216,9 +216,6 @@ sub build_model {
             next;
         }
 
-        if (!$slide->{video} && grep { exists $dir->{$_} } qw(name title buildIn buildOut)) {
-            warn "Lower third directives are only used on a video slide\n";
-        }
         if (exists $dir->{backdrop}) {
             my $backdrop = $dir->{backdrop} // '';
             die "Bad backdrop: $backdrop\n" unless $backdrop eq 'blur';
@@ -333,6 +330,15 @@ sub render {
     $json =~ s/</\\u003c/g;
 
     my $slides = join("\n", @html);
+    my $has_nonvideo_lower_third = grep {
+        !length($_->{video}) && exists $_->{dir}{name}
+    } (@{ $model->{main} }, @{ $model->{fillers} });
+    if ($has_nonvideo_lower_third) {
+        # Keep generated pages byte-for-byte stable unless a non-video lower
+        # third is requested. Video slides already start these timers.
+        $template =~ s/if \(slide\.dataset\.kind !== 'video'\) clearLowerThird\(\);/\/\/ Lower thirds may also belong to ordinary slides.\n    clearLowerThird();/;
+        $template =~ s/if \(slide\.dataset\.kind === 'video'\) \{\n      startLowerThird\(slide\);/startLowerThird(slide);\n    if (slide.dataset.kind === 'video') {/;
+    }
     $template =~ s/<!-- SLIDES_PLACEHOLDER -->/$slides/;
     $template =~ s|/\* DECK_CONFIG \*/|$json|;
     return $template;
@@ -385,7 +391,7 @@ sub slide_html {
         $src =~ s/ /%20/g;
         push @attrs, 'data-video="' . $src . '"';
         my $attr = join ' ', @attrs;
-        my $lower = lower_third_html($slide) . ccliNoticeHtml($slide) . notesHtml($slide);
+        my $lower = lower_third_html($slide, 'video') . ccliNoticeHtml($slide) . notesHtml($slide);
         my $blur = defined $slide->{dir}{backdrop} && $slide->{dir}{backdrop} eq 'blur';
         my $videos = $blur
             ? qq{    <canvas class="video-fill" aria-hidden="true"></canvas>\n}
@@ -420,7 +426,7 @@ HTML
             . join('', map { '        <li>' . esc($_) . "</li>\n" } @{ $slide->{bullets} })
             . "      </ul>\n";
     }
-    my $notes = ccliNoticeHtml($slide) . notesHtml($slide);
+    my $notes = lower_third_html($slide, 'slide') . ccliNoticeHtml($slide) . notesHtml($slide);
     my $attr = join ' ', @attrs;
     return <<"HTML";
   <div $attr>
@@ -457,9 +463,11 @@ sub ccliNoticeHtml {
 }
 
 sub lower_third_html {
-    my ($slide) = @_;
+    my ($slide, $kind) = @_;
     my $dir = $slide->{dir};
-    my $wanted = grep { exists $dir->{$_} } qw(name title buildIn buildOut);
+    my $wanted = $kind eq 'video'
+        ? grep { exists $dir->{$_} } qw(name title buildIn buildOut)
+        : exists $dir->{name};
     return '' unless $wanted;
     my $build_in  = exists $dir->{buildIn}  ? duration_ms($dir->{buildIn})  : 3000;
     my $build_out = exists $dir->{buildOut} ? duration_ms($dir->{buildOut}) : 8000;

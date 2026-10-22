@@ -36,7 +36,8 @@ Deck settings go at the top:
 
 `// backdrop: blur` keeps the whole frame on a video slide. The sides are filled with a blurred enlargement of that same picture, so a portrait video stays full height instead of being cropped.
 
-A video slide can carry a lower third. Any one of these four comments turns it on:
+A slide can carry a lower third by adding `// name:`; video slides also retain
+the earlier behavior where any one of these four comments turns it on:
 
 ```
 // name: Ada Lovelace
@@ -183,7 +184,7 @@ The keys are PowerPoint's and Proclaim's, so presentation clickers work.
 - Home, End: first and last slide. A number then Enter jumps to that slide; digits not followed by Enter within 1.5 seconds are forgotten, so a stray digit never turns a later Enter into a jump.
 - B or `.`: black screen. The next Next or Back brings the picture back without moving. On an auto-advancing deck or a cycling section the show keeps moving underneath the black, so the picture comes back at the live point.
 - S: the service order over the slides; Esc closes it.
-- L: show or hide the current slide's lower third (a video slide with `// name:` / `// title:`) by hand, in every window, including the overlay for NDI. It overrides that slide's `buildIn` / `buildOut` until the slide changes; going to another slide, or coming back, starts the slide's own timing again. Black still hides it on the audience view, and the overlay stays transparent while it is down. On a slide without a lower third, L does nothing. In the macOS app L asks Swift with `{type: 'request', lowerThird}` and the page shows it when `presenter.apply` brings `lowerThird` back; relaying that is still to do on the Swift side.
+- L: show or hide the current slide's lower third by hand, in every window, including the overlay for NDI. It overrides that slide's `buildIn` / `buildOut` until the slide changes; going to another slide, or coming back, starts the slide's own timing again. Black still hides it on the audience view, and the overlay stays transparent while it is down. On a slide without a lower third, L does nothing. In the macOS app L asks Swift with `{type: 'request', lowerThird}` and the page shows it when `presenter.apply` brings `lowerThird` back; relaying that is still to do on the Swift side.
 - F: fullscreen.
 
 In the macOS app the clicker keys (arrows, Page Up/Down, Space, Home, End, B, `.`) are taken by the app before the page sees them; the others above still work through the page.

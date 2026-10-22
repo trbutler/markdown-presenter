@@ -58,6 +58,14 @@ like($html, qr/<p class="subtitle">\x{b9}\x{2076}For God so loved/, 'scripture v
 like($html, qr/id="servicePanel"/, 'service panel element');
 like($html, qr/id="notesPanel"/, 'notes panel element');
 
+($rc, $html, $stderr) = generate("$deck/lowerthird-still.md");
+is($rc, 0, 'non-video lower-third deck builds') or diag $stderr;
+is($stderr, '', 'non-video lower third has no warning');
+like($html, qr/<div class="lower-third" data-build-in="2000" data-build-out="9000">\s*<div class="lt-window">\s*<div class="lt-bar">\s*<div class="lt-name">Ada Lovelace<\/div>\s*<div class="lt-title">Mathematician<\/div>/,
+    'non-video slide gets the usual lower-third markup and timing');
+like($html, qr/startLowerThird\(slide\);\s*if \(slide\.dataset\.kind === 'video'\) \{\s*const fit/,
+    'all slides start lower-third timing while video setup stays video-only');
+
 ($rc, $html, $stderr) = generate("$deck/service.md", MDP_DIATHEKE => "$FindBin::Bin/bin/no-such-tool");
 isnt($rc, 0, 'missing diatheke stops the build');
 like($stderr, qr/service\.md:\d+: !scripture John 3:16-18 \(KJV\) needs diatheke/, 'and says where and why');
