@@ -5,6 +5,7 @@ import PresenterCore
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let controller = DeckController()
+    private var midiTerminationPending = false
     private var windowManager: WindowManager?
     private var keyRouter: KeyRouter?
     private var overlay: OverlayOutput?
@@ -26,6 +27,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    // VERIFY-ON-MAC: confirm terminateLater/reply delegate integration with the
+    // selected AppKit SDK; neither waiting nor the 500 ms deadline blocks MainActor.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !midiTerminationPending else { return .terminateLater }
+        midiTerminationPending = true
+        controller.stopMIDI { [weak self] in
+            Task { @MainActor in
+                self?.finishMIDITermination()
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(500)) { [weak self] in
+            self?.finishMIDITermination()
+        }
+        return .terminateLater
+    }
+
+    private func finishMIDITermination() {
+        guard midiTerminationPending else { return }
+        midiTerminationPending = false
+        NSApp.reply(toApplicationShouldTerminate: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

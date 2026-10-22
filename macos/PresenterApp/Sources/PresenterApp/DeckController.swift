@@ -43,8 +43,8 @@ final class DeckController {
         broadcast()
     }
 
-    func stopMIDI() {
-        midiOutput.stop()
+    func stopMIDI(completion: @escaping @Sendable () -> Void = {}) {
+        midiOutput.stop(completion: completion)
     }
 
     func handle(_ message: BridgeMessage, from role: ViewRole) {

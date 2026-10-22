@@ -12,6 +12,7 @@ final class MIDIOutput: @unchecked Sendable {
     private var missingOutputs: Set<String> = []
     private var reportedErrors: Set<String> = []
     private var stopped = false
+    private var pendingNoteOffs = MIDIPendingNoteOffs()
 
     func send(_ request: MIDIRequest) {
         queue.async { [weak self] in
@@ -19,12 +20,18 @@ final class MIDIOutput: @unchecked Sendable {
         }
     }
 
-    /// Enqueue shutdown; pending delayed messages become no-ops.
-    func stop() {
-        queue.async { [weak self] in
-            guard let self = self else { return }
-            self.stopped = true
-            self.dispose()
+    /// Retain the sender until offs and All Notes Off have been sent and disposed.
+    /// AppDelegate waits asynchronously for completion, with a 500 ms deadline.
+    func stop(completion: @escaping @Sendable () -> Void = {}) {
+        queue.async { [self] in
+            if !stopped {
+                stopped = true
+                for message in pendingNoteOffs.drainForShutdown() {
+                    sendNow(message.bytes, to: message.endpoint, duringShutdown: true)
+                }
+                dispose()
+            }
+            completion()
         }
     }
 
@@ -34,14 +41,19 @@ final class MIDIOutput: @unchecked Sendable {
         guard destination != 0 else { return }
         let origin = DispatchTime.now()
         for message in request.messages {
+            let pendingOff = pendingNoteOffs.track(message.bytes, to: destination)
             if message.delayMs == 0 {
-                sendNow(message.bytes, to: destination)
+                if sendNow(message.bytes, to: destination), let pendingOff = pendingOff {
+                    pendingNoteOffs.complete(pendingOff)
+                }
             } else {
                 // Keep a note-off on the endpoint that received its note-on.
                 // A setup change invalidates lookup for future batches, not this one.
                 queue.asyncAfter(deadline: origin + message.delayMs / 1000) { [weak self] in
                     guard let self = self, !self.stopped else { return }
-                    self.sendNow(message.bytes, to: destination)
+                    if self.sendNow(message.bytes, to: destination), let pendingOff = pendingOff {
+                        self.pendingNoteOffs.complete(pendingOff)
+                    }
                 }
             }
         }
@@ -98,8 +110,9 @@ final class MIDIOutput: @unchecked Sendable {
         return name as String
     }
 
-    private func sendNow(_ bytes: [UInt8], to destination: MIDIEndpointRef) {
-        guard !stopped, port != 0 else { return }
+    @discardableResult
+    private func sendNow(_ bytes: [UInt8], to destination: MIDIEndpointRef, duringShutdown: Bool = false) -> Bool {
+        guard (!stopped || duringShutdown), port != 0 else { return false }
         // One validated 1-3 byte message fits the C struct's inline packet storage.
         // VERIFY-ON-MAC: confirm MIDIPacketList pointer/size imports and MIDISend
         // with the target SDK; this legacy MIDI 1.0 API is available on macOS 13.
@@ -118,7 +131,12 @@ final class MIDIOutput: @unchecked Sendable {
         }
         if status != noErr {
             reportOnce("send-\(destination)", "MIDI send failed (OSStatus \(status)); dropping message")
+            return false
         }
+        if !duringShutdown {
+            pendingNoteOffs.recordSent(bytes, to: destination)
+        }
+        return true
     }
 
     private func reportOnce(_ key: String, _ text: String) {
