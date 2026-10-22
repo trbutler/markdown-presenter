@@ -44,7 +44,7 @@ final class WindowManager {
                 let window = PresenterWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 540), styleMask: WindowManager.operatorStyle, backing: .buffered, defer: false)
                 window.title = role.title
                 window.isReleasedWhenClosed = false
-                window.contentView = page.webView
+                window.contentView = page.presentationView
                 windows[role] = window
             }
         }

@@ -20,7 +20,7 @@ final class OverlayOutput {
     private let window: NSWindow
     private let sink: FrameSink
     private var timer: Timer?
-    private var captureInFlight = false
+    private var captureInFlight: UUID?
     private var runID: UUID?
     private(set) var droppedTicks = 0
 
@@ -41,7 +41,7 @@ final class OverlayOutput {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.contentAspectRatio = NSSize(width: width, height: height)
-        window.contentView = OverlayPreviewView(webView: page.webView, renderSize: NSSize(width: width, height: height))
+        window.contentView = OverlayPreviewView(contentView: page.presentationView, renderSize: NSSize(width: width, height: height))
     }
 
     var sinkName: String { sink.displayName }
@@ -69,7 +69,7 @@ final class OverlayOutput {
 
     func stop() {
         runID = nil
-        captureInFlight = false
+        captureInFlight = nil
         timer?.invalidate()
         timer = nil
         sink.stop()
@@ -80,30 +80,48 @@ final class OverlayOutput {
         guard let runID = runID else {
             return
         }
+        guard !page.isRestoring else {
+            sendTransparentFrame()
+            return
+        }
+        let restorationID = page.restorationID
         // Never queue snapshots: if the last one has not returned, drop this
         // tick. Latency stays bounded at about one frame plus snapshot time.
-        guard !captureInFlight else {
+        guard captureInFlight != restorationID else {
             droppedTicks += 1
             return
         }
-        captureInFlight = true
+        captureInFlight = restorationID
         let config = WKSnapshotConfiguration()
         config.afterScreenUpdates = false
         config.rect = page.webView.bounds
         config.snapshotWidth = NSNumber(value: outputWidth)
+        // VERIFY-ON-MAC: check snapshot callback/NSImage isolation with Swift 5.9 strict checking.
         page.webView.takeSnapshot(with: config) { [weak self] image, error in
             let cgImage = image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
             Task { @MainActor in
-                self?.deliver(cgImage, error: error, runID: runID)
+                self?.deliver(cgImage, error: error, runID: runID, restorationID: restorationID)
             }
         }
     }
 
-    private func deliver(_ image: CGImage?, error: Error?, runID: UUID) {
+    private func sendTransparentFrame() {
+        sink.send(VideoFrame(width: outputWidth, height: outputHeight, bytesPerRow: outputWidth * 4,
+                             format: sink.preferredFormat, timestamp: Date().timeIntervalSince1970,
+                             pixels: Data(count: outputWidth * outputHeight * 4)))
+    }
+
+    private func deliver(_ image: CGImage?, error: Error?, runID: UUID, restorationID: UUID) {
         guard self.runID == runID else {
             return
         }
-        captureInFlight = false
+        if captureInFlight == restorationID {
+            captureInFlight = nil
+        }
+        guard page.restorationID == restorationID, !page.isRestoring else {
+            // An old callback must not overwrite a frame from a restored page.
+            return
+        }
         guard let image = image else {
             if let error = error {
                 NSLog("[OverlayOutput] snapshot failed: %@", String(describing: error))
@@ -121,15 +139,15 @@ final class OverlayOutput {
 private final class OverlayPreviewView: NSView {
     private let renderSize: NSSize
 
-    init(webView: WKWebView, renderSize: NSSize) {
+    init(contentView: NSView, renderSize: NSSize) {
         self.renderSize = renderSize
         super.init(frame: NSRect(x: 0, y: 0, width: 480, height: 270))
         // VERIFY-ON-MAC: confirm WKWebView layout/snapshot use these logical bounds
         // under an NSView bounds transform, including preview resizing and Retina.
         setBoundsSize(renderSize)
-        webView.autoresizingMask = []
-        webView.frame = NSRect(origin: .zero, size: renderSize)
-        addSubview(webView)
+        contentView.autoresizingMask = []
+        contentView.frame = NSRect(origin: .zero, size: renderSize)
+        addSubview(contentView)
     }
 
     required init?(coder: NSCoder) {

@@ -74,6 +74,21 @@ final class BridgeTests: XCTestCase {
         XCTAssertEqual(valid?.commands, [.go(2)])
     }
 
+    func testAppliedAcknowledgementDoesNotChangeDeckState() {
+        let message = BridgeMessage(body: ["type": "applied", "token": "push-123"])
+        XCTAssertEqual(message, .applied(token: "push-123"))
+        XCTAssertEqual(message?.commands, [])
+        XCTAssertNil(BridgeMessage(body: ["type": "applied"]))
+        XCTAssertNil(BridgeMessage(body: ["type": "applied", "token": ""]))
+        XCTAssertNil(BridgeMessage(body: ["type": "applied", "token": 123] as [String: Any]))
+    }
+
+    func testAcknowledgedApplyEncodesTokenAsJSONString() {
+        let script = BridgeScript.apply(DeckState(timerStart: 1000), acknowledgement: "quote\"\n")
+        XCTAssertTrue(script.contains("token: \"quote\\\"\\n\""))
+        XCTAssertTrue(script.contains("type: 'applied'"))
+    }
+
     func testRejectsJunk() {
         XCTAssertNil(BridgeMessage(body: "next"))
         XCTAssertNil(BridgeMessage(body: ["type": "launch-missiles"] as [String: Any]))
