@@ -118,7 +118,12 @@ enum FrameConverter {
                 // In place: source and destination describe the same memory.
                 var source = vImage_Buffer(data: base, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: bytesPerRow)
                 var destination = source
-                vImageUnpremultiplyData_BGRA8888(&source, &destination, vImage_Flags(kvImageNoFlags))
+                // Alpha is last in both RGBA and BGRA; all colour channels divide alike.
+                // VERIFY-ON-MAC: confirm the RGBA8888 declaration and in-place conversion.
+                let error = vImageUnpremultiplyData_RGBA8888(&source, &destination, vImage_Flags(kvImageNoFlags))
+                guard error == kvImageNoError else {
+                    return false
+                }
             }
             return true
         }
