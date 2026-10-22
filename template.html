@@ -1404,12 +1404,20 @@
     const buildIn = Number(el.dataset.buildIn) - since;
     const buildOut = Number(el.dataset.buildOut) - since;
     const stillHere = () => playOrder[current] && playOrder[current].slide === slide;
-    if (buildIn <= 0) el.classList.add('is-on');
+    // A late window puts a step the room has already taken in place at once:
+    // replaying its slide-in (or the slide-in plus fade of buildOut) would show
+    // a bar the room no longer has, on the overlay (NDI) too.
+    const already = (...names) => {
+      if (since > 0) el.style.transition = 'none';
+      el.classList.add(...names);
+      if (since > 0) { void el.offsetWidth; el.style.transition = ''; }
+    };
+    if (buildIn <= 0) already('is-on');
     else lowerTimers.push(setTimeout(() => {
       if (!stillHere()) return;
       el.classList.add('is-on');
     }, buildIn));
-    if (buildOut <= 0) el.classList.add('is-on', 'is-out');
+    if (buildOut <= 0) already('is-on', 'is-out');
     else lowerTimers.push(setTimeout(() => {
       if (!stillHere()) return;
       el.classList.add('is-out');
