@@ -53,7 +53,7 @@ public enum BridgeMessage: Equatable, Sendable {
             return n
         }
         if let d = value as? Double, d.isFinite {
-            return Int(d)
+            return Int(exactly: d)
         }
         return nil
     }

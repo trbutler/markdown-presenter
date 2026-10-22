@@ -61,6 +61,19 @@ final class BridgeTests: XCTestCase {
         XCTAssertEqual(m?.commands, [.go(2), .setBlack(false)])
     }
 
+    func testRejectsUnrepresentableAndFractionalIndices() {
+        for value in [1e100, 1.5, Double.infinity, Double.nan] {
+            let message = BridgeMessage(body: ["type": "request", "index": value] as [String: Any])
+            XCTAssertEqual(message?.commands, [])
+            let boxed = BridgeMessage(body: ["type": "request", "index": NSNumber(value: value)] as [String: Any])
+            XCTAssertEqual(boxed?.commands, [])
+            let ready = BridgeMessage(body: ["type": "ready", "count": value] as [String: Any])
+            XCTAssertEqual(ready?.commands, [.setCount(0)])
+        }
+        let valid = BridgeMessage(body: ["type": "request", "index": 2.0] as [String: Any])
+        XCTAssertEqual(valid?.commands, [.go(2)])
+    }
+
     func testRejectsJunk() {
         XCTAssertNil(BridgeMessage(body: "next"))
         XCTAssertNil(BridgeMessage(body: ["type": "launch-missiles"] as [String: Any]))
