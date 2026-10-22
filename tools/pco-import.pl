@@ -89,7 +89,7 @@ for my $item (sort { $a->{attributes}{sequence} <=> $b->{attributes}{sequence} }
     my @itemBlocks;
     my $isScripture = 0;
     if ($type eq 'header') {
-        push @itemBlocks, '// section: ' . safeText($title) . "\n// insert: 0\n\n# " . safeText($title);
+        push @itemBlocks, '// section: ' . metadataField($title, 'Item title') . "\n// insert: 0\n\n# " . $title;
     } elsif ($type eq 'song') {
         my ($song) = related($item, 'song', 'Song', 0);
         my ($arrangement) = related($item, 'arrangement', 'Arrangement', 0);
@@ -104,9 +104,10 @@ for my $item (sort { $a->{attributes}{sequence} <=> $b->{attributes}{sequence} }
     } elsif ($type eq 'media') {
         push @itemBlocks, placeholder($title, 'Media is not imported; add a local media file before presenting.');
     } elsif ($type eq 'item') {
-        my $reference = scriptureReference($title);
+        my ($reference, $warning) = scriptureReference($title);
         $isScripture = defined $reference;
-        push @itemBlocks, defined $reference ? "!scripture $reference ($translation)" : '# ' . safeText($title);
+        push @itemBlocks, $warning ? placeholder($title, $warning) . "\n\n" . safeText($warning)
+            : defined $reference ? "!scripture $reference ($translation)" : '# ' . $title;
     } else {
         push @itemBlocks, placeholder($title, "Unsupported item type '$type'; complete this item manually.");
     }
@@ -162,7 +163,11 @@ sub scriptureReference {
     my $prefixed = $title =~ s/^Scripture:\s*//i;
     my $reference = eval { parseReference($title) };
     fail('invalid scripture reference in Item title') if $prefixed && !$reference;
-    return $reference ? $reference->{display} : undef;
+    return unless $reference;
+    if (!$prefixed && grep { !defined $_->{startVerse} || !defined $_->{endVerse} } @{ $reference->{ranges} }) {
+        return (undef, 'Chapter-only scripture needs verses; add a verse range or prefix the title with Scripture: to import whole chapters.');
+    }
+    return ($reference->{display}, undef);
 }
 
 sub validateResource {
@@ -203,9 +208,10 @@ sub safeText {
 }
 
 # Pipes delimit fields in // song, so use a visible fullwidth pipe in data.
-# Replace source // with fullwidth slashes and neutralise other leading
-# presenter syntax. Single-line validation prevents new directive injection.
-sub songField {
+# Replace source // with fullwidth slashes. These values follow a trusted
+# directive prefix; single-line validation prevents new directive injection.
+# Only unprefixed slide-text lines need the invisible safeText prefix.
+sub metadataField {
     my ($value, $name) = @_;
     return '' unless defined $value;
     $value = text($value, $name);
@@ -213,14 +219,14 @@ sub songField {
     $value = singleLine($value, $name);
     $value =~ s/\|/\x{ff5c}/g;
     $value =~ s{//}{\x{ff0f}\x{ff0f}}g;
-    return safeText($value);
+    return $value;
 }
 
 sub songDirective {
     my ($title, $attrs) = @_;
-    my @fields = (songField($title, 'Song title'));
-    push @fields, songField($attrs->{$_}, "Song $_") for qw(author copyright);
-    my $number = songField($attrs->{ccli_number}, 'Song ccli_number');
+    my @fields = (metadataField($title, 'Song title'));
+    push @fields, metadataField($attrs->{$_}, "Song $_") for qw(author copyright);
+    my $number = metadataField($attrs->{ccli_number}, 'Song ccli_number');
     push @fields, length($number) ? 'CCLI Song # ' . $number : '';
     pop @fields while @fields && $fields[-1] eq '';
     return '// song: ' . join(' | ', @fields);
@@ -228,7 +234,7 @@ sub songDirective {
 
 sub placeholder {
     my ($title, $warning) = @_;
-    return '# ' . safeText($title) . "\n\n// pcoWarning: " . safeText($warning)
+    return '# ' . $title . "\n\n// pcoWarning: " . safeText($warning)
         . "\n\n[PCO import: manual completion required]";
 }
 
@@ -272,6 +278,6 @@ sub songBlocks {
             fail('Arrangement sequence cannot order unlabelled lyrics') if exists $sections{__unlabelled};
         }
     }
-    return map { '# ' . safeText($title) . "\n\n" . safeText($_) }
+    return map { '# ' . $title . "\n\n" . safeText($_) }
         map { @{ $sections{$_} } } @order;
 }

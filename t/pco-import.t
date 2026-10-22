@@ -143,6 +143,28 @@ for my $case (['1 Jn 1:9', '!scripture 1 John 1:9 (KJV)'], ['Mission 2026', '# M
     is($rc, 0, "item title '$case->[0]' imported");
     like($stdout, qr/^\Q$case->[1]\E$/m, 'only a valid Bible reference becomes a scripture directive');
 }
+for my $title ('Mark 1', 'Mark 1-2', 'Mark 1:1;2') {
+    my $file = changedFixture(sub { $_[0]{data}[6]{attributes}{title} = $title });
+    ($rc, $stdout, $err) = runImport('--fixture', $file);
+    is($rc, 0, "bare chapter reference '$title' imports as a placeholder");
+    is($err, '', 'chapter policy produces an operator-visible deck warning, not an import failure');
+    like($stdout, qr/^# \Q$title\E$/m, 'chapter placeholder keeps the original title');
+    like($stdout, qr{^// pcoWarning: Chapter-only scripture needs verses;.*Scripture:}m, 'chapter placeholder explains verses or explicit whole-chapter marker');
+    unlike($stdout, qr/^!scripture Mark /m, 'bare chapter cannot silently expand');
+    my ($code, $generated, $error) = generateImported($stdout);
+    is($code, 0, 'chapter placeholder generates without fetching a whole chapter') or diag $error;
+    like($generated, qr/\[PCO import: manual completion required\]/, 'chapter placeholder is visible in the generated deck');
+    like($generated, qr/Chapter-only scripture needs verses; add a verse range/, 'generated placeholder visibly tells the operator how to fix the reference');
+}
+for my $case (['Scripture: Mark 1', 'Mark 1'], ['scripture: Mark 1-2', 'Mark 1-2'],
+        ['Mark 1:1-2:3', 'Mark 1:1-2:3'], ['Jude 5', 'Jude 5']) {
+    my ($title, $reference) = @$case;
+    my $file = changedFixture(sub { $_[0]{data}[6]{attributes}{title} = $title });
+    ($rc, $stdout) = runImport('--fixture', $file);
+    is($rc, 0, "explicit chapter or bounded verse reference '$title' imports");
+    like($stdout, qr/^!scripture \Q$reference\E \(KJV\)$/m, 'explicit chapters and verse references emit the intended scripture directive');
+    unlike($stdout, qr{^// pcoWarning: Chapter-only scripture}m, 'no manual-completion warning for an intentional reference');
+}
 my $unknown = changedFixture(sub { $_[0]{data}[7]{attributes}{item_type} = 'custom_cue' });
 ($rc, $stdout) = runImport('--fixture', $unknown);
 is($rc, 0, 'unknown type is preserved for manual completion');
@@ -154,6 +176,7 @@ my $literalText = changedFixture(sub {
 ($rc, $stdout) = runImport('--fixture', $literalText);
 is($rc, 0, 'presenter syntax in source notes stays literal');
 unlike($stdout, qr/^!include missing\.md$/m, 'source notes cannot request includes');
+like($stdout, qr/^\x{200b}!include missing\.md$/m, 'unprefixed note text retains invisible syntax protection');
 like($stdout, qr/A & B/, 'ordinary punctuation remains readable');
 
 open my $preserved, '<:encoding(UTF-8)', $outFile or die $!;
@@ -209,10 +232,65 @@ my $hostile = changedFixture(sub {
 my ($hostileRc, $hostileMd) = runImport('--fixture', $hostile);
 is($hostileRc, 0, 'delimiter and presenter syntax in metadata neutralised');
 my ($hostileLine) = $hostileMd =~ m{^(// song: .+)$}m;
-my $hostileExpected = "// song: \x{ff0f}\x{ff0f} ccli: 999 \x{ff5c} <Song & \"Title\"> | \x{200b}!include missing.md \x{ff5c} \x{ff0f}\x{ff0f} songEnd | © 2026 \x{ff5c} <Publisher> | CCLI Song # 42 \x{ff5c} \x{ff0f}\x{ff0f} song: Injected";
-is($hostileLine, $hostileExpected, 'pipes become fullwidth pipes, double slashes become fullwidth slashes, leading syntax stays literal');
+my $hostileExpected = "// song: \x{ff0f}\x{ff0f} ccli: 999 \x{ff5c} <Song & \"Title\"> | !include missing.md \x{ff5c} \x{ff0f}\x{ff0f} songEnd | © 2026 \x{ff5c} <Publisher> | CCLI Song # 42 \x{ff5c} \x{ff0f}\x{ff0f} song: Injected";
+is($hostileLine, $hostileExpected, 'metadata neutralises pipes and double slashes without an invisible prefix');
+unlike($hostileLine, qr/\x{200b}/, 'hostile song metadata has no inserted zero-width space');
 is(scalar(() = $hostileLine =~ /\|/g), 3, 'only the three field delimiters remain ASCII pipes');
 unlike($hostileMd, qr{^\s*(?://\s*ccli\s*:|!include)}m, 'source metadata cannot inject a licence or include directive');
+
+for my $title ('!include missing.md', '# Grace', 'Note: Grace', 'bg: black', '<Grace>') {
+    my $file = changedFixture(sub { $_[0]{included}[0]{attributes}{title} = $title });
+    my ($code, $body) = runImport('--fixture', $file);
+    is($code, 0, 'syntax-like song title imports as literal metadata');
+    my ($line) = $body =~ m{^(// song: .+)$}m;
+    is($line, '// song: ' . $title . ' | Ada Writer & Ben Composer | © 2026 Example Publishing | CCLI Song # 424242', 'exact song line preserves literal metadata without an invisible prefix');
+    unlike($line, qr/\x{200b}/, 'song title metadata has no inserted zero-width space');
+    unlike($body, qr/^!include missing\.md$/m, 'song title cannot become a standalone include');
+    my ($generatedCode, $generated, $error) = generateImported($body);
+    is($generatedCode, 0, 'syntax-like title survives real generator') or diag $error;
+    unlike($error, qr/!include file not found/, 'literal song title does not request a file');
+}
+
+my $headerTitle = '!include missing.md | // ccli: 999';
+my $header = changedFixture(sub { $_[0]{data}[1]{attributes}{title} = $headerTitle });
+($rc, $stdout) = runImport('--fixture', $header);
+is($rc, 0, 'hostile section label imports');
+my ($sectionLine) = $stdout =~ m{^(// section: .+)$}m;
+is($sectionLine, "// section: !include missing.md \x{ff5c} \x{ff0f}\x{ff0f} ccli: 999", 'section label uses visible delimiter neutralisation without an invisible prefix');
+unlike($sectionLine, qr/\x{200b}/, 'section label has no inserted zero-width space');
+like($stdout, qr/^# \Q$headerTitle\E$/m, 'trusted heading prefix protects the visible header text');
+my ($headerRc, $headerHtml, $headerErr) = generateImported($stdout);
+is($headerRc, 0, 'hostile section label survives real generator') or diag $headerErr;
+unlike($headerErr, qr/!include file not found/, 'section label does not request a file');
+unlike($headerHtml, qr/CCLI License # 999/, 'section label cannot enable a licence');
+
+for my $resource ('Item', 'Song') {
+    my $file = changedFixture(sub {
+        if ($resource eq 'Item') {
+            $_[0]{data}[1]{attributes}{title} = "Header\n// ccli: 999";
+        } else {
+            $_[0]{included}[0]{attributes}{title} = "Song\n// ccli: 999";
+        }
+    });
+    my ($code, $body, $error) = runImport('--fixture', $file);
+    isnt($code, 0, "$resource metadata rejects a newline directive injection");
+    is($body, '', 'newline injection produces no partial deck');
+    like($error, qr/title must be a nonempty single line/, 'newline injection identifies the metadata field');
+}
+
+my $literalLyrics = changedFixture(sub {
+    $_[0]{included}[1]{attributes}{lyrics} = "!include missing.md\n// ccli: 999\n---\nNote: literal lyric";
+    delete $_[0]{included}[1]{attributes}{sequence};
+});
+($rc, $stdout) = runImport('--fixture', $literalLyrics);
+is($rc, 0, 'syntax-like lyric lines import');
+for my $line ('!include missing.md', '// ccli: 999', '---', 'Note: literal lyric') {
+    like($stdout, qr/^\x{200b}\Q$line\E$/m, 'unprefixed lyric line retains invisible syntax protection');
+}
+my ($literalRc, $literalHtml, $literalErr) = generateImported($stdout);
+is($literalRc, 0, 'protected lyric lines survive the generator') or diag $literalErr;
+unlike($literalErr, qr/!include file not found/, 'lyric text cannot request a file');
+unlike($literalHtml, qr/CCLI License # 999/, 'lyric text cannot enable a licence');
 
 my $multiline = changedFixture(sub { $_[0]{included}[0]{attributes}{author} = "Writer\n// ccli: 999" });
 ($rc, $stdout, $err) = runImport('--fixture', $multiline);
