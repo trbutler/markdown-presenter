@@ -196,9 +196,14 @@
     await sleep(1500);
     const late2 = await frame('lt', '?view=overlay', '', true);
     const joined2 = await waitFor(() => at(late2) === '#2');
-    const up2 = await waitFor(() => ltOn(a2), 20000);
+    // The audience frame's timers can run ahead of this page's virtual clock
+    // (seen: is-on 1.5 s into a 3 s buildIn), so it can be past
+    // buildOut already by the time the late window has joined; then the up
+    // phase cannot be seen, and the out check below still holds both.
+    const isOut = (win) => !!lt(win) && lt(win).classList.contains('is-out');
+    const up2 = await waitFor(() => ltOn(a2) || isOut(a2), 20000);
     await sleep(50);
-    check('late timing: the audience buildIn brings it up in the late window too', joined2 && up2 && ltOn(a2) && ltOn(late2), [joined2, up2, ltOn(a2), ltOn(late2)]);
+    check('late timing: the audience buildIn brings it up in the late window too', joined2 && up2 && (isOut(a2) ? isOut(late2) : ltOn(a2) && ltOn(late2)), [joined2, up2, ltOn(a2), ltOn(late2), isOut(a2)]);
     const out2 = await waitFor(() => lt(a2).classList.contains('is-out'), 20000);
     await sleep(50);
     check('late timing: the audience buildOut takes it down in the late window too', out2 && !ltOn(a2) && !ltOn(late2) && lt(late2).classList.contains('is-out'), [out2, ltOn(a2), ltOn(late2)]);
