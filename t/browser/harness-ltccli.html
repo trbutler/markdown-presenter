@@ -195,20 +195,46 @@
     const a2 = await frame('lt', '', '#2');
     await sleep(1500);
     const late2 = await frame('lt', '?view=overlay', '', true);
-    await waitFor(() => at(late2) === '#2');
-    await waitFor(() => ltOn(a2), 20000);
+    const joined2 = await waitFor(() => at(late2) === '#2');
+    const up2 = await waitFor(() => ltOn(a2), 20000);
     await sleep(50);
-    check('late timing: the audience buildIn brings it up in the late window too', ltOn(a2) && ltOn(late2), [ltOn(a2), ltOn(late2)]);
-    await waitFor(() => lt(a2).classList.contains('is-out'), 20000);
+    check('late timing: the audience buildIn brings it up in the late window too', joined2 && up2 && ltOn(a2) && ltOn(late2), [joined2, up2, ltOn(a2), ltOn(late2)]);
+    const out2 = await waitFor(() => lt(a2).classList.contains('is-out'), 20000);
     await sleep(50);
-    check('late timing: the audience buildOut takes it down in the late window too', !ltOn(a2) && !ltOn(late2) && lt(late2).classList.contains('is-out'), [ltOn(a2), ltOn(late2)]);
+    check('late timing: the audience buildOut takes it down in the late window too', out2 && !ltOn(a2) && !ltOn(late2) && lt(late2).classList.contains('is-out'), [out2, ltOn(a2), ltOn(late2)]);
     const late3 = await frame('lt', '?view=overlay', '', true);
-    await waitFor(() => at(late3) === '#2');
+    const joined3 = await waitFor(() => at(late3) === '#2');
     await sleep(100);
+    check('late timing: the late window joined', joined3, at(late3));
     check('late timing: a window joining after buildOut starts with it down', !ltOn(late3) && lt(late3).classList.contains('is-out'), lt(late3) && lt(late3).className);
     key(late3, 'l');
     await waitFor(() => ltOn(a2));
     check('late timing: L in that window then shows it everywhere', ltOn(a2) && ltOn(late2) && ltOn(late3), [ltOn(a2), ltOn(late2), ltOn(late3)]);
+
+    // A reply to an older hello must not undo a manual L made since: a lone
+    // window's hello goes unanswered, L is pressed, then a stale automatic
+    // reply (timing long past buildOut) arrives for that hello.
+    clear();
+    const spy = new BroadcastChannel('mdp:' + new URL(decks.lt).pathname);
+    let hello = null;
+    spy.onmessage = (e) => { if (e.data && e.data.type === 'hello') hello = e.data.nonce; };
+    const solo = await frame('lt', '', '#2');
+    const asked = await waitFor(() => hello !== null);
+    key(solo, 'l');
+    check('stale reply: L shows it in a lone window', asked && ltOn(solo), [asked, ltOn(solo)]);
+    // Virtual time does not wait for the channel, so a black message from the
+    // same sender marks when the reply before it has been handled.
+    const handled = async () => {
+      spy.postMessage({ type: 'black', on: true, from: 'spy' });
+      const seen = await waitFor(() => solo.document.body.classList.contains('blacked'));
+      spy.postMessage({ type: 'black', on: false, from: 'spy' });
+      await waitFor(() => !solo.document.body.classList.contains('blacked'));
+      return seen;
+    };
+    spy.postMessage({ type: 'show', reply: true, nonce: hello, n: 1, node: 1, black: false, lowerThird: null, lowerStart: Date.now() - 20000, from: 'spy' });
+    const done = await handled();
+    check('stale reply: an older automatic reply does not take a newer manual L down', done && ltOn(solo), [done, lt(solo) && lt(solo).className]);
+    spy.close();
 
     // App views: the slide holds, so the timing rules can be checked.
     w = await nativeFrame('lt', 'overlay');
