@@ -21,6 +21,18 @@
     }
     return cond();
   }
+  // A witness message proves an earlier one from the same sender has landed
+  // (one sender's messages arrive in order). Virtual time does not wait for
+  // BroadcastChannel, so keep re-sending the witness on the same channel
+  // object until it shows up rather than trusting one fixed wait.
+  async function witness(cond, resend) {
+    for (let i = 0; i < 600; i++) {
+      if (cond()) return true;
+      if (i % 10 === 0) resend();
+      await sleep(20);
+    }
+    return cond();
+  }
   function clear() { document.querySelectorAll('iframe').forEach(f => f.remove()); }
   function load(src) {
     return new Promise((resolve) => {
@@ -110,10 +122,31 @@
     // arrive in order, so once it has landed the stale reply has been handled.
     b.eval("{ const c = new BroadcastChannel('mdp:' + location.pathname);" +
       " c.postMessage({ type: 'show', reply: true, n: 0, node: 0, black: false, from: 'stale' });" +
-      " c.postMessage({ type: 'timer', start: 12345, from: 'stale' }); window.__staleChannel = c; }");
-    const delivered = await waitFor(() => a.presenter.state().timerStart === 12345);
+      " window.__staleChannel = c; }");
+    const delivered = await witness(() => a.presenter.state().timerStart === 12345,
+      () => b.eval("window.__staleChannel.postMessage({ type: 'timer', start: 12345, from: 'stale' })"));
     check('join: the stale reply was delivered', delivered);
     check('join: a stale hello reply does not pull a passive window back', at(a) === '#3', at(a));
+
+    // 3b. A reply that arrives late (a background tab answering after more
+    //     than 1.5 s) is still taken by the window that asked, and ignored by
+    //     every other window. This page plays the slow answering window.
+    const hellos = [];
+    const relay = new BroadcastChannel('mdp:' + new URL(decks.service).pathname);
+    relay.onmessage = (e) => { if (e.data && e.data.type === 'hello') hellos.push(e.data); };
+    const c = await frame('service', '?now=08:00', '#1');
+    await waitFor(() => hellos.length >= 1);
+    const asked = hellos[0];
+    const other = await frame('service', '?view=notes&now=08:00', '', true);
+    await waitFor(() => hellos.length >= 2);
+    await sleep(1700);
+    relay.postMessage({ type: 'show', reply: true, nonce: asked && asked.nonce, n: 2, node: 2, black: false, from: 'late' });
+    const lateDelivered = await witness(() => c.presenter.state().timerStart === 23456 && other.presenter.state().timerStart === 23456,
+      () => relay.postMessage({ type: 'timer', start: 23456, from: 'late' }));
+    check('late reply: delivered to both windows', lateDelivered);
+    check('late reply: taken by the window that asked', at(c) === '#3', at(c));
+    check('late reply: ignored by a window that did not ask', at(other) === '#1', at(other));
+    relay.close();
 
     // 4. An empty deck says so and still reports ready with count 0.
     w = await nativeFrame('empty', 'audience');

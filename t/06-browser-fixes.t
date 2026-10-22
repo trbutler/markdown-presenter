@@ -59,7 +59,7 @@ if (defined $json) {
     $json =~ s/&amp;/&/g;
 }
 my $checks = eval { decode_json(Encode::encode('UTF-8', $json)) } || [];
-ok(scalar @$checks >= 18, 'ran the fix checks (' . scalar(@$checks) . ')');
+ok(scalar @$checks >= 21, 'ran the fix checks (' . scalar(@$checks) . ')');
 foreach my $c (@$checks) {
     ok($c->{ok}, "browser: $c->{name}") or diag "got: " . ($c->{got} // '');
 }

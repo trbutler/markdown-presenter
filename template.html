@@ -718,7 +718,11 @@
   // Windows of the same deck follow each other: open ?view=notes on the
   // laptop and the plain deck on the projector, and either one drives.
   const peerId = Math.random().toString(36).slice(2);
-  let joining = true;
+  // A window opened late asks where the show is with a hello that carries a
+  // nonce; replies echo it. Only the window that asked takes a reply, and
+  // only while that hello is still pending, however late the reply arrives
+  // (a background tab can answer seconds later). Live moves always apply.
+  let pendingHello = null;
   // Inside the app Swift relays instead, so the channel stays closed there.
   let channel = null;
   if (!nativeBridge) {
@@ -736,9 +740,10 @@
     channel.onmessage = (event) => {
       const msg = event.data || {};
       if (msg.from === peerId) return;
-      // A reply to a hello is only for a window still waiting to join:
-      // one that has moved since must not be pulled back by a late reply.
-      if (msg.type === 'show' && msg.reply && !joining) return;
+      // A reply is only for the window whose pending hello it answers.
+      if (msg.type === 'show' && msg.reply) {
+        if (!pendingHello || msg.nonce !== pendingHello) return;
+      }
       if (msg.type === 'show') {
         const node = deckSlides()[msg.node];
         let n = msg.n;
@@ -749,16 +754,15 @@
         if (playOrder[n] && n !== current) showSlide(n, true);
         if (typeof msg.black === 'boolean' && msg.black !== blacked) setBlack(msg.black, true);
         if (typeof msg.timerStart === 'number') timerStart = msg.timerStart;
-        // Once in step (a reply or a live move), later replies to other
-        // windows' hellos must not pull this one back, even if it is only
-        // ever driven from elsewhere.
-        joining = false;
+        // In step now (the answer, or a newer live move): a slower reply to
+        // the same hello must not pull this window back.
+        pendingHello = null;
       } else if (msg.type === 'black') {
         setBlack(!!msg.on, true);
       } else if (msg.type === 'timer') {
         if (typeof msg.start === 'number') timerStart = msg.start;
       } else if (msg.type === 'hello') {
-        post({ type: 'show', reply: true, n: current, node: nodeIndex(playOrder[current] && playOrder[current].slide), black: blacked, timerStart: timerStart });
+        post({ type: 'show', reply: true, nonce: msg.nonce, n: current, node: nodeIndex(playOrder[current] && playOrder[current].slide), black: blacked, timerStart: timerStart });
       }
     };
   }
@@ -1048,7 +1052,7 @@
     markService();
     tick();
     if (!fromRemote) {
-      joining = false;
+      pendingHello = null;
       post({ type: 'show', n: n, node: nodeIndex(playOrder[n].slide), black: blacked });
     }
   }
@@ -1499,8 +1503,10 @@
   } else {
     showSlide(indexFromHash(), true);
   }
-  post({ type: 'hello' });
-  setTimeout(() => { joining = false; }, 1500);
+  if (channel) {
+    pendingHello = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    post({ type: 'hello', nonce: pendingHello });
+  }
   if (nativeBridge) {
     nativeBridge.postMessage({
       type: 'ready',
