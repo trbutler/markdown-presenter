@@ -21,6 +21,7 @@ final class OverlayOutput {
     private let sink: FrameSink
     private var timer: Timer?
     private var captureInFlight = false
+    private var runID: UUID?
     private(set) var droppedTicks = 0
 
     init(deckURL: URL, controller: DeckController, sink: FrameSink, width: Int = 1920, height: Int = 1080, framesPerSecond: Double = 30, sourceName: String = "markdown-presenter overlay") {
@@ -34,7 +35,7 @@ final class OverlayOutput {
         // A visible, transparent preview window: the desktop shows through
         // wherever the overlay is clear. Kept on screen because WebKit may
         // throttle painting in fully hidden or occluded windows.
-        window = PresenterWindow(contentRect: NSRect(x: 80, y: 80, width: 480, height: 270), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        window = PresenterWindow(contentRect: NSRect(x: 80, y: 80, width: 480, height: 270), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.title = ViewRole.overlay.title + " preview"
         window.isReleasedWhenClosed = false
         window.isOpaque = false
@@ -46,7 +47,11 @@ final class OverlayOutput {
     var sinkName: String { sink.displayName }
 
     func start() throws {
+        guard runID == nil else {
+            return
+        }
         try sink.start(sourceName: sourceName, width: outputWidth, height: outputHeight, framesPerSecond: framesPerSecond)
+        runID = UUID()
         window.orderFront(nil)
         let timer = Timer(timeInterval: 1 / framesPerSecond, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -63,6 +68,8 @@ final class OverlayOutput {
     }
 
     func stop() {
+        runID = nil
+        captureInFlight = false
         timer?.invalidate()
         timer = nil
         sink.stop()
@@ -70,6 +77,9 @@ final class OverlayOutput {
     }
 
     private func tick() {
+        guard let runID = runID else {
+            return
+        }
         // Never queue snapshots: if the last one has not returned, drop this
         // tick. Latency stays bounded at about one frame plus snapshot time.
         guard !captureInFlight else {
@@ -84,12 +94,15 @@ final class OverlayOutput {
         page.webView.takeSnapshot(with: config) { [weak self] image, error in
             let cgImage = image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
             Task { @MainActor in
-                self?.deliver(cgImage, error: error)
+                self?.deliver(cgImage, error: error, runID: runID)
             }
         }
     }
 
-    private func deliver(_ image: CGImage?, error: Error?) {
+    private func deliver(_ image: CGImage?, error: Error?, runID: UUID) {
+        guard self.runID == runID else {
+            return
+        }
         captureInFlight = false
         guard let image = image else {
             if let error = error {
