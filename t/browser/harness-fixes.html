@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Presenter template-fix checks</title>
+</head>
+<body>
+<pre id="result">pending</pre>
+<script>
+  // Loaded by t/06-browser-fixes.t in headless Chromium. Regression checks
+  // for the hub 1213+1214 template fixes. Writes one JSON line into #result.
+  const q = new URLSearchParams(location.search);
+  const decks = { service: q.get('service'), auto: q.get('auto'), empty: q.get('empty') };
+  const checks = [];
+  const check = (name, ok, got) => checks.push({ name, ok: !!ok, got: got === undefined ? null : String(got) });
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  async function waitFor(cond, tries) {
+    for (let i = 0; i < (tries || 200); i++) {
+      if (cond()) return true;
+      await sleep(20);
+    }
+    return cond();
+  }
+  function clear() { document.querySelectorAll('iframe').forEach(f => f.remove()); }
+  function load(src) {
+    return new Promise((resolve) => {
+      const f = document.createElement('iframe');
+      f.style.width = '1280px';
+      f.style.height = '720px';
+      f.onload = () => resolve(f.contentWindow);
+      f.src = src;
+      document.body.appendChild(f);
+    });
+  }
+  // A plain browser window of a deck.
+  function frame(deck, query, hash, keep) {
+    if (!keep) clear();
+    return load(decks[deck] + (query || '') + (hash || ''));
+  }
+  // The deck as the macOS app loads it: a fake WebKit message handler that
+  // records what the page posts, and the view the app injects.
+  function nativeFrame(deck, view) {
+    clear();
+    return new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest();
+      x.open('GET', decks[deck]);
+      x.onload = () => {
+        const inject = '<script>window.__msgs = []; window.__errs = [];' +
+          'window.addEventListener("error", e => window.__errs.push(String(e.message)));' +
+          'window.webkit = { messageHandlers: { presenter: { postMessage: m => window.__msgs.push(JSON.parse(JSON.stringify(m))) } } };' +
+          'window.__presenterView = ' + JSON.stringify(view) + ';<\/script>';
+        const html = x.responseText.replace('<head>', '<head>' + inject);
+        load(URL.createObjectURL(new Blob([html], { type: 'text/html' }))).then(resolve);
+      };
+      x.onerror = () => reject(new Error('cannot read ' + decks[deck]));
+      x.send();
+    });
+  }
+  function key(win, k) {
+    win.document.dispatchEvent(new win.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+  }
+  const at = (win) => win.location.hash;
+  const css = (win, el, prop) => el ? win.getComputedStyle(el)[prop] : 'missing';
+  const blacked = (win) => win.document.body.classList.contains('blacked');
+
+  async function run() {
+    // 1. Black on an autoAdvance deck stays black and the show keeps moving
+    //    underneath (as a cycle section does); Next from black only restores.
+    let w = await frame('auto', '', '#1');
+    await sleep(100);
+    key(w, 'b');
+    check('auto: B blacks', blacked(w));
+    await sleep(2600);
+    check('auto: still black after one interval', blacked(w), w.document.body.className);
+    check('auto: advanced underneath the black', at(w) === '#2', at(w));
+    key(w, 'PageDown');
+    check('auto: Next from black only restores', !blacked(w) && at(w) === '#2', at(w));
+    await sleep(2600);
+    check('auto: keeps advancing after the restore', at(w) === '#3', at(w));
+
+    // 2. The number buffer expires, and the app's apply clears it.
+    w = await frame('service', '?now=08:00', '#1');
+    await sleep(100);
+    key(w, '3'); key(w, 'Enter');
+    check('digits: 3 Enter still jumps', at(w) === '#3', at(w));
+    key(w, 'Home'); key(w, '3');
+    await sleep(1700);
+    key(w, 'Enter');
+    check('digits: a stale 3 then Enter is plain Next', at(w) === '#2', at(w));
+    w = await nativeFrame('service', 'audience');
+    await sleep(100);
+    key(w, '3');
+    w.presenter.apply({ index: 4, black: false, timerStart: Date.now() });
+    w.__msgs.length = 0;
+    key(w, 'Enter');
+    const req = w.__msgs.filter(m => m.type === 'request').pop();
+    check('digits: apply clears them (Enter asks for the next slide)', req && req.index === 5, JSON.stringify(w.__msgs));
+
+    // 3. A window only ever driven from elsewhere stops taking hello replies.
+    const a = await frame('service', '?now=08:00', '#1');
+    await sleep(1700);
+    const b = await frame('service', '?view=notes&now=08:00', '', true);
+    await sleep(300);
+    key(b, 'PageDown'); key(b, 'PageDown');
+    await waitFor(() => at(a) === '#3');
+    check('join: audience follows to #3', at(a) === '#3', at(a));
+    // A late reply to some other window's hello, sent from inside a deck
+    // window (a channel made in this harness page would not reach the deck).
+    // Then a timer message from the same sender: messages from one sender
+    // arrive in order, so once it has landed the stale reply has been handled.
+    b.eval("{ const c = new BroadcastChannel('mdp:' + location.pathname);" +
+      " c.postMessage({ type: 'show', reply: true, n: 0, node: 0, black: false, from: 'stale' });" +
+      " c.postMessage({ type: 'timer', start: 12345, from: 'stale' }); window.__staleChannel = c; }");
+    const delivered = await waitFor(() => a.presenter.state().timerStart === 12345);
+    check('join: the stale reply was delivered', delivered);
+    check('join: a stale hello reply does not pull a passive window back', at(a) === '#3', at(a));
+
+    // 4. An empty deck says so and still reports ready with count 0.
+    w = await nativeFrame('empty', 'audience');
+    await sleep(200);
+    const empty = w.document.getElementById('emptyDeck');
+    check('empty: explicit message', empty && css(w, empty, 'display') !== 'none' && /no slides/.test(empty.textContent), empty && empty.textContent);
+    const ready = w.__msgs.find(m => m.type === 'ready');
+    check('empty: ready with count 0', ready && ready.count === 0, JSON.stringify(w.__msgs));
+    check('empty: no script error', w.__errs.length === 0, w.__errs.join(' | '));
+
+    // 5. In the app a view waits, hidden, for the first apply.
+    w = await nativeFrame('service', 'audience');
+    await sleep(200);
+    let slide = w.document.querySelector('.slide.active');
+    check('waiting: audience hidden before the first apply', css(w, slide, 'visibility') === 'hidden', css(w, slide, 'visibility'));
+    w.presenter.apply({ index: 2, black: false, timerStart: Date.now() });
+    slide = w.document.querySelector('.slide.active');
+    check('waiting: first apply shows the live slide', css(w, slide, 'visibility') === 'visible' && w.presenter.state().index === 2, css(w, slide, 'visibility'));
+    w = await nativeFrame('service', 'overlay');
+    await sleep(200);
+    check('waiting: overlay transparent and empty before the first apply', css(w, w.document.body, 'backgroundColor') === 'rgba(0, 0, 0, 0)' && css(w, w.document.querySelector('.slide.active'), 'visibility') === 'hidden');
+    w = await nativeFrame('service', 'confidence');
+    await sleep(200);
+    check('waiting: notes view still draws before the first apply', css(w, w.document.querySelector('.slide.active'), 'visibility') === 'visible');
+  }
+
+  run().then(() => {
+    document.getElementById('result').textContent = JSON.stringify(checks);
+  }).catch((err) => {
+    checks.push({ name: 'harness error', ok: false, got: String(err && err.stack || err) });
+    document.getElementById('result').textContent = JSON.stringify(checks);
+  });
+</script>
+</body>
+</html>
