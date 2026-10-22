@@ -55,7 +55,7 @@ is_deeply(\@lyrics, ['Morning light upon the hill', 'Grace is new with every daw
 like($md, qr/!scripture John 3:16-18 \(KJV\)/, 'Scripture-prefixed item title uses default KJV');
 like($md, qr/!scripture Psalm 23:1 \(KJV\)/, 'bare Bible reference item title uses default KJV');
 like($md, qr/Note:\nPiano introduction, then everyone\.\n\nWorship leader:.*\nLet the last chord ring\.\n<!-- \/notes -->/, 'description and multiline related notes');
-like($md, qr/!scripture John.*\n\nNote:\nInvite.*\n\nReader:/, 'scripture notes attached to scripture block');
+like($md, qr/Note:\nInvite.*\n\nReader:.*\n<!-- \/notes -->\n\n!scripture John/, 'closed scripture notes precede expansion into verse slides');
 like($md, qr/# Bells\n\nNote:\nRing three times\./, 'ordinary documented item retains its heading and notes');
 like($md, qr/# Mission update\n\n\/\/ pcoWarning: Media is not imported; add a local media file before presenting\.\n\n\[PCO import: manual completion required\]/, 'documented media item becomes a visible placeholder');
 
@@ -180,6 +180,26 @@ my $partial = changedFixture(sub {
 is($rc, 0, 'null and empty metadata fields accepted');
 like($stdout, qr{^// song: Morning Mercy \|  \|  \| CCLI Song # 424242$}m, 'missing middle fields retain positions without invented values');
 
+for my $field (qw(author copyright ccli_number)) {
+    for my $blank (' ', "\t", " \r\n\t ") {
+        my $file = changedFixture(sub { $_[0]{included}[0]{attributes}{$field} = $blank });
+        my $absent = changedFixture(sub { $_[0]{included}[0]{attributes}{$field} = undef });
+        my ($code, $body, $error) = runImport('--fixture', $file);
+        my ($absentCode, $absentBody) = runImport('--fixture', $absent);
+        is($code, 0, "whitespace-only Song $field is optional");
+        is($error, '', "whitespace-only Song $field gives no error");
+        is($absentCode, 0, "null Song $field is optional");
+        is($body, $absentBody, "whitespace-only Song $field is omitted exactly like null");
+    }
+}
+for my $title (undef, '', ' ', "\t") {
+    my $file = changedFixture(sub { $_[0]{included}[0]{attributes}{title} = $title });
+    my ($code, $body, $error) = runImport('--fixture', $file);
+    isnt($code, 0, 'Song title remains required');
+    is($body, '', 'missing Song title emits no partial deck');
+    like($error, qr/Song title must be (?:text|a nonempty single line)/, 'missing Song title identifies the required field');
+}
+
 my $hostile = changedFixture(sub {
     $_[0]{included}[0]{attributes}{title} = '// ccli: 999 | <Song & "Title">';
     $_[0]{included}[0]{attributes}{author} = '!include missing.md | // songEnd';
@@ -219,6 +239,16 @@ sub generateImported {
 my ($genRc, $html, $genErr) = generateImported($md);
 is($genRc, 0, 'imported deck generates with no licence configured') or diag $genErr;
 unlike($html, qr/class="ccli-notice"/, 'round trip stays off until operator supplies a licence');
+my @scriptureSlides = $html =~ /(^ {2,}<div class="slide(?: slide-video)?" data-deck="main".*?^  <\/div>)/msg;
+my @johnSlides = grep { /<div class="kicker">John 3:/ } @scriptureSlides;
+is(scalar @johnSlides, 2, 'real generator splits John 3:16-18 into two slides');
+like($johnSlides[0] // '', qr/John 3:16-17/, 'first scripture slide starts at verse 16');
+like($johnSlides[-1] // '', qr/John 3:18/, 'last scripture slide contains verse 18');
+for my $note ('Invite the congregation to stand.', 'Reader: pause after verse 17.') {
+    like($johnSlides[0] // '', qr{<aside class="notes"[^>]*>.*\Q$note\E.*</aside>}s, "$note is in the first scripture slide notes aside");
+    unlike($johnSlides[-1] // '', qr/\Q$note\E/, "$note does not leak to the last scripture slide");
+}
+unlike($johnSlides[-1] // '', qr/<aside class="notes"/, 'last scripture slide has no notes aside');
 ($genRc, $html, $genErr) = generateImported("// ccli: 12345\n\n" . $md);
 is($genRc, 0, 'import to generator round trip succeeds with a manual licence') or diag $genErr;
 unlike($genErr, qr/Malformed \/\/ song/, 'imported song directives are accepted by the real parser');

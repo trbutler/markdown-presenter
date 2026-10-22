@@ -87,6 +87,7 @@ for my $item (sort { $a->{attributes}{sequence} <=> $b->{attributes}{sequence} }
         push @notes, text($note->{attributes}{content}, 'ItemNote content');
     }
     my @itemBlocks;
+    my $isScripture = 0;
     if ($type eq 'header') {
         push @itemBlocks, '// section: ' . safeText($title) . "\n// insert: 0\n\n# " . safeText($title);
     } elsif ($type eq 'song') {
@@ -104,12 +105,18 @@ for my $item (sort { $a->{attributes}{sequence} <=> $b->{attributes}{sequence} }
         push @itemBlocks, placeholder($title, 'Media is not imported; add a local media file before presenting.');
     } elsif ($type eq 'item') {
         my $reference = scriptureReference($title);
+        $isScripture = defined $reference;
         push @itemBlocks, defined $reference ? "!scripture $reference ($translation)" : '# ' . safeText($title);
     } else {
         push @itemBlocks, placeholder($title, "Unsupported item type '$type'; complete this item manually.");
     }
     @notes = grep { /\S/ } @notes;
-    $itemBlocks[0] .= "\n\nNote:\n" . join("\n\n", map { safeText($_) } @notes) . "\n<!-- /notes -->" if @notes;
+    if (@notes) {
+        my $notes = "Note:\n" . join("\n\n", map { safeText($_) } @notes) . "\n<!-- /notes -->";
+        # Scripture expands before slide splitting. A closed notes block before
+        # the directive stays with its first verse slide, not its last.
+        $itemBlocks[0] = $isScripture ? "$notes\n\n$itemBlocks[0]" : "$itemBlocks[0]\n\n$notes";
+    }
     push @blocks, @itemBlocks;
     push @blocks, '// songEnd' if $type eq 'song';
 }
@@ -200,7 +207,9 @@ sub safeText {
 # presenter syntax. Single-line validation prevents new directive injection.
 sub songField {
     my ($value, $name) = @_;
-    return '' unless defined $value && $value ne '';
+    return '' unless defined $value;
+    $value = text($value, $name);
+    return '' unless $value =~ /\S/;
     $value = singleLine($value, $name);
     $value =~ s/\|/\x{ff5c}/g;
     $value =~ s{//}{\x{ff0f}\x{ff0f}}g;
