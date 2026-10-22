@@ -6,12 +6,25 @@ use Test::More;
 use JSON::PP;
 use IPC::Open3;
 use Symbol qw(gensym);
+use Cwd qw(getcwd);
+use File::Path qw(make_path);
+use File::Temp qw(tempdir);
 
 binmode Test::More->builder->$_, ':encoding(UTF-8)' for qw(output failure_output todo_output);
 
 my $root = "$FindBin::Bin/..";
 my $deck = "$FindBin::Bin/fixtures/deck";
 my $fake = "$FindBin::Bin/bin/fake-diatheke";
+make_path("$root/build/tmp");
+my $temp = tempdir('lowerthird-XXXXXX', DIR => "$root/build/tmp", CLEANUP => 0);
+
+sub writeFixture {
+    my ($file, $text) = @_;
+    open my $out, '>:encoding(UTF-8)', $file or die $!;
+    print {$out} $text;
+    close $out or die $!;
+    return $file;
+}
 
 sub generate {
     my ($file, %env) = @_;
@@ -65,6 +78,61 @@ like($html, qr/<div class="lower-third" data-build-in="2000" data-build-out="900
     'non-video slide gets the usual lower-third markup and timing');
 like($html, qr/startLowerThird\(slide\);\s*if \(slide\.dataset\.kind === 'video'\) \{\s*const fit/,
     'all slides start lower-third timing while video setup stays video-only');
+
+for my $case (['title', 'Presenter'], ['buildIn', '2s'], ['buildOut', '9s']) {
+    my ($key, $value) = @$case;
+    my $file = writeFixture("$temp/unnamed-$key.md", "// $key: $value\n\n# Still slide\n");
+    ($rc, $html, $stderr) = generate($file);
+    is($rc, 0, "unnamed still slide with $key still builds");
+    like($stderr, qr{unnamed-\Q$key\E\.md:1: Lower third on a still slide needs // name:}, "$key without name warns with source file and line");
+    unlike($html, qr/<div class="lower-third"/, "$key alone does not create a still-slide lower third");
+
+    $file = writeFixture("$temp/named-$key.md", "// $key: $value\n// name: Ada\n\n# Still slide\n");
+    ($rc, $html, $stderr) = generate($file);
+    is($rc, 0, "named still slide with $key builds");
+    is($stderr, '', "named still slide with $key does not warn");
+
+    $file = writeFixture("$temp/video-$key.md", "// video: local.mp4\n// $key: $value\n");
+    ($rc, $html, $stderr) = generate($file);
+    is($rc, 0, "video with $key and no name builds");
+    is($stderr, '', "video with $key keeps its no-warning behavior");
+    like($html, qr/<div class="lower-third"/, "video with $key keeps its lower third");
+}
+my $includedWarning = writeFixture("$temp/include.md", "!include unnamed-title.md\n");
+($rc, $html, $stderr) = generate($includedWarning);
+is($rc, 0, 'included unnamed lower-third directive builds');
+like($stderr, qr{unnamed-title\.md:1: Lower third on a still slide needs // name:}, 'warning uses the included source location');
+
+open my $templateFile, '<:encoding(UTF-8)', "$root/template.html" or die $!;
+my $template = do { local $/; <$templateFile> };
+close $templateFile;
+my @hooks = (
+    ['reset', "if (slide.dataset.kind !== 'video') clearLowerThird();"],
+    ['timing', "if (slide.dataset.kind === 'video') {\n      startLowerThird(slide);"],
+);
+for my $hook (@hooks) {
+    my ($label, $target) = @$hook;
+    my $custom = $template;
+    my $changed = $custom =~ s/\Q$target\E/\/\/ Hook removed for regression test/;
+    is($changed, 1, "$label test removes an actual patch target");
+    my $directory = "$temp/missing-$label";
+    make_path($directory);
+    writeFixture("$directory/template.html", $custom);
+    my $previous = getcwd();
+    chdir $directory or die $!;
+    ($rc, $html, $stderr) = generate("$deck/lowerthird-still.md");
+    chdir $previous or die $!;
+    isnt($rc, 0, "missing $label hook stops still-slide lower-third generation");
+    is($html, '', "missing $label hook emits no partial HTML");
+    like($stderr, qr/Cannot enable still-slide lower thirds: template \Q$label\E hook not found/, "missing $label hook has a clear error");
+
+    my $plain = writeFixture("$temp/plain.md", "# Plain slide\n");
+    chdir $directory or die $!;
+    ($rc, $html, $stderr) = generate($plain);
+    chdir $previous or die $!;
+    is($rc, 0, "deck without still-slide lower thirds does not require $label hook");
+    is($stderr, '', "unused $label hook produces no error or warning");
+}
 
 ($rc, $html, $stderr) = generate("$deck/service.md", MDP_DIATHEKE => "$FindBin::Bin/bin/no-such-tool");
 isnt($rc, 0, 'missing diatheke stops the build');
