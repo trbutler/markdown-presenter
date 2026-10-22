@@ -86,30 +86,32 @@
     await sleep(200);
     check('plain deck: no MIDI status in notes', midiStatus(n) === null, midiStatus(n));
 
-    // One audience window: the first slide goes out once in step, then one
-    // message per change, with the right bytes, to the matching port only.
+    // One audience window: opening the deck sends nothing (an older window
+    // may already be sending that slide); each later change sends once, with
+    // the right bytes, to the matching port only.
     w = await frame('midi', { midi: 'ok', hash: '#1' });
     await sleep(1700);
     check('midi: access requested once', w.__midiReq === 1, w.__midiReq);
-    check('midi: first slide sends default program change = index 0 on channel 2', bytes(w) === '[[193,0]]', bytes(w));
+    check('midi: opening the deck sends nothing', w.__sent.length === 0, bytes(w));
     key(w, 'PageDown');
-    check('midi: // midi: pc 9', bytes(w) === '[[193,0],[193,9]]', bytes(w));
+    check('midi: // midi: pc 9 on the deck channel 2', bytes(w) === '[[193,9]]', bytes(w));
     key(w, 'PageDown');
-    check('midi: // midi: cc 20 127', w.__sent.length === 3 && JSON.stringify(w.__sent[2].bytes) === '[177,20,127]', bytes(w));
+    check('midi: // midi: cc 20 127', w.__sent.length === 2 && JSON.stringify(w.__sent[1].bytes) === '[177,20,127]', bytes(w));
     key(w, 'PageDown');
-    const on = w.__sent[3], off = w.__sent[4];
+    const on = w.__sent[2], off = w.__sent[3];
     check('midi: // midi: note 3 60 = note on, then note off 200 ms later, channel 3',
-      w.__sent.length === 5 && JSON.stringify(on.bytes) === '[146,60,100]' && JSON.stringify(off.bytes) === '[130,60,0]' && Math.round(off.at - on.at) === 200, bytes(w));
+      w.__sent.length === 4 && JSON.stringify(on.bytes) === '[146,60,100]' && JSON.stringify(off.bytes) === '[130,60,0]' && Math.round(off.at - on.at) === 200, bytes(w));
     key(w, 'PageDown');
-    check('midi: // midi: off sends nothing', w.__sent.length === 5, bytes(w));
+    check('midi: // midi: off sends nothing', w.__sent.length === 4, bytes(w));
     key(w, 'PageDown');
-    check('midi: pc 300 clamps to 127', w.__sent.length === 6 && JSON.stringify(w.__sent[5].bytes) === '[193,127]', bytes(w));
+    check('midi: pc 300 clamps to 127', w.__sent.length === 5 && JSON.stringify(w.__sent[4].bytes) === '[193,127]', bytes(w));
     check('midi: never the port that does not match out="fake"', !w.__sent.some(s => s.wrongPort));
     key(w, 'End');
-    check('midi: End on the last slide (no change) sends nothing', w.__sent.length === 6, bytes(w));
+    check('midi: End on the last slide (no change) sends nothing', w.__sent.length === 5, bytes(w));
+    key(w, 'Home');
+    check('midi: a slide without // midi: sends program change = its index (0)', w.__sent.length === 6 && JSON.stringify(w.__sent[5].bytes) === '[193,0]', bytes(w));
     // Black sends nothing; Next from black only restores and sends nothing;
     // the next real change sends once.
-    key(w, 'Home');
     const beforeBlack = w.__sent.length;
     key(w, 'b'); key(w, 'PageDown');
     check('midi: black and un-black send nothing', w.__sent.length === beforeBlack, bytes(w));
@@ -127,7 +129,7 @@
     const ov = await frame('midi', { midi: 'ok', view: 'overlay' }, true);
     const a2 = await frame('midi', { midi: 'ok' }, true);
     await sleep(1700);
-    const a0 = a.__sent.length, a20 = a2.__sent.length;
+    const a0 = a.__sent.length;
     // Virtual time does not wait for BroadcastChannel, so poll long enough
     // for the move to land rather than one fixed wait.
     key(n, 'PageDown');
@@ -136,21 +138,44 @@
     await waitFor(() => idx(a) === 2 && idx(a2) === 2 && a.__sent.length > a0 + 1, 600);
     await sleep(100);
     check('remote: audience sends once per change driven from notes', a.__sent.length === a0 + 2 && JSON.stringify(a.__sent.slice(a0).map(s => s.bytes)) === '[[193,9],[177,20,127]]', JSON.stringify(a.__sent.slice(a0).map(s => s.bytes)));
-    // a20 is taken after a2's 1.5 s claim window; its own start slide may go
-    // out once inside headless Chromium's virtual time, which runs that
-    // window out before the older window's claim crosses processes.
-    check('remote: second audience window sends nothing for the changes', a2.__sent.length === a20, a2.__sent.length + ' vs ' + a20);
+    check('remote: second audience window sends nothing, counted from when it opened', a2.__sent.length === 0, JSON.stringify(a2.__sent.map(s => s.bytes)));
     check('remote: notes, service, lyrics, overlay never request MIDI', [n, sv, ly, ov].every(x => x.__midiReq === 0 && x.__sent.length === 0), [n, sv, ly, ov].map(x => x.__midiReq).join(','));
     check('status: notes shows the audience window\'s MIDI port', /Fake Port/.test(midiStatus(n) || ''), midiStatus(n));
     check('status: service shows it too', /Fake Port/.test(midiStatus(sv) || ''), midiStatus(sv));
     check('status: never in audience, lyrics or overlay', midiStatus(a) === null && midiStatus(ly) === null && midiStatus(ov) === null);
+
+    // An older sender whose claim arrives late: a window opened on its own
+    // never sends its start slide, and once the older claim lands it stops
+    // sending changes. (This page plays the older window.)
+    const x = await frame('midi', { midi: 'ok', hash: '#3' });
+    const relay = new BroadcastChannel('mdp:' + x.location.pathname);
+    const heard = [];
+    relay.onmessage = (e) => { if (e.data && e.data.type === 'midi-claim') heard.push(e.data); };
+    await sleep(1700);
+    check('late claim: the new window did not send its start slide', x.__sent.length === 0, bytes(x));
+    const before = heard.length;
+    // The new window answers an unknown claim with its own: proof it landed.
+    // Virtual time does not wait for BroadcastChannel, so re-send the same
+    // claim on the same channel until that answer shows up (repeats of a
+    // known claim are ignored).
+    let landed = false;
+    for (let i = 0; i < 3000 && !landed; i++) {
+      if (i % 50 === 0) relay.postMessage({ type: 'midi-claim', since: 1, from: 'older-window' });
+      await sleep(1);
+      landed = heard.length > before;
+    }
+    check('late claim: delivered', landed);
+    key(x, 'PageDown'); key(x, 'PageDown');
+    await sleep(100);
+    check('late claim: the new window sends nothing once an older sender is known', x.__sent.length === 0 && idx(x) === 4, bytes(x) + ' at ' + idx(x));
+    relay.close();
 
     // A timer advance sends too, once.
     w = await frame('auto', { midi: 'ok', hash: '#1' });
     await sleep(1700);
     const t0 = w.__sent.length;
     await sleep(2400);
-    check('timer: an autoAdvance move sends once', idx(w) >= 1 && w.__sent.length === t0 + idx(w), JSON.stringify(w.__sent.map(s => s.bytes)) + ' at ' + idx(w));
+    check('timer: an autoAdvance move sends once', t0 === 0 && idx(w) >= 1 && w.__sent.length === idx(w), JSON.stringify(w.__sent.map(s => s.bytes)) + ' at ' + idx(w));
 
     // Denied or missing Web MIDI: the show runs; notes says so.
     w = await frame('midi', { midi: 'deny', hash: '#1' });

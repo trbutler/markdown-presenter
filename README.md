@@ -162,8 +162,9 @@ turns it on: `out` is part of the output port's name (any port if left out), `ch
 // midi: off           nothing for this slide
 ```
 
-- Only the audience view sends, once per slide change, whoever moved the show: a key, a timer, a cycle, a countdown, or another window. Opening the deck sends the current slide once the window is in step (after the answer to its hello, or 1.5 seconds). Pressing B sends nothing; a move under black still sends.
-- With two audience windows open in one browser, the one opened first sends. A newly opened audience window sends nothing for its first 1.5 seconds while it hears from older ones. If the older window is a background tab that does not answer within that time, the new one can send its start slide once.
+- Only the audience view sends, once per slide change, whoever moved the show: a key, a timer, a cycle, a countdown, or another window. Pressing B sends nothing; a move under black still sends.
+- Opening the deck in a browser sends nothing: the first slide change does. (Another audience window may already be sending, and a window cannot know that in time.) Inside the macOS app, Swift's first `presenter.apply` sends the live slide.
+- With two audience windows open in one browser, the one opened first sends. A newly opened audience window sends nothing for its first 1.5 seconds, never sends the slide it opened on, and stops as soon as it hears from an older one. Only if an older window is a background tab whose messages are delayed past those 1.5 seconds, and the slide changes in that gap, can both send that one change.
 - Web MIDI needs Chrome or Edge (Firefox 108+ with permission; not Safari) and a secure page, so serve the deck from `http://localhost` (for example `python3 -m http.server`) rather than opening the file. If MIDI is denied or missing, the show runs anyway and the notes and service views say why at the top right.
 - Inside the macOS app the page does not use Web MIDI. The audience view posts `{type: 'midi', index, out, messages: [{bytes, delayMs}]}` to Swift instead. Sending it from Swift is still to do (Bridge.swift ignores unknown messages today).
 

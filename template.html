@@ -805,7 +805,13 @@
           const k = playOrder.findIndex(item => item.slide === node);
           if (k >= 0) n = k;
         }
-        if (playOrder[n] && n !== current) showSlide(n, true);
+        if (playOrder[n] && n !== current) {
+          // The answer to this window's hello brings it in step; that is not
+          // a slide change, so it sends no MIDI.
+          midiJoinShow = !!msg.reply;
+          showSlide(n, true);
+          midiJoinShow = false;
+        }
         if (typeof msg.black === 'boolean' && msg.black !== blacked) setBlack(msg.black, true);
         if (typeof msg.timerStart === 'number') timerStart = msg.timerStart;
         if (msg.reply && typeof msg.lowerThird === 'boolean') setLowerThird(msg.lowerThird, true);
@@ -1611,6 +1617,7 @@
   // Off unless the deck has // midi: (or // midiOut:); without it the page
   // never asks for MIDI access. Only the audience view sends, once per slide
   // change, whoever moved the show (a key, a timer, another window, the app).
+  // In a browser, opening the deck sends nothing; the first change does.
   // A slide's own // midi: pc|cc|note wins; otherwise the slide sends a
   // program change equal to its play-order index (0-based, fillers included),
   // clamped to 0-127. Black sends nothing; a move under black still sends.
@@ -1627,8 +1634,12 @@
   let midiLast = -1;
   let midiStatusText = '';
   // A new audience window first listens for 1.5 s for an older one (which
-  // keeps sending); only then may it send, so two never send at once.
+  // keeps sending). It never sends the slide it opened on (or was moved to by
+  // the answer to its hello): an older window may already have sent it, and
+  // its claim may arrive late. It sends only later changes, and only while no
+  // older window has claimed sending.
   let midiClaimOpen = true;
+  let midiJoinShow = false;
 
   const clamp7 = (x) => Math.max(0, Math.min(127, Math.round(Number(x)) || 0));
   function midiChannel(ch) {
@@ -1691,28 +1702,31 @@
       if (messages.length) nativeBridge.postMessage({ type: 'midi', index: n, out: midiDeck.out || '', messages: messages });
       return;
     }
-    if (midiClaimOpen || !midiOutput) { midiPending = n; return; }
-    if (!midiOwner()) { midiPending = null; return; }
+    if (midiClaimOpen || !midiOwner()) return;
+    if (!midiOutput) { midiPending = n; return; }
     midiLast = n;
     const t0 = performance.now();
     midiMessages(n).forEach(m => {
       try { midiOutput.send(m.bytes, t0 + m.delayMs); } catch (err) { midiStatus('MIDI: send failed (' + err.message + ')'); }
     });
   }
-  // The first slide goes out once this window is in step: after the join
-  // window in a browser, after Swift's first apply in the app. A late window
-  // never sends the slide it opened on before it learns the live one.
+  // In the app there is one audience view, so Swift's first apply sends the
+  // live slide. In a browser the start-up slide is never sent (see above).
   function midiSettle() {
     if (!midiSends || midiSettled) return;
     if (nativeBridge && !midiApplied) return;
     midiSettled = true;
-    midiSend(current);
+    if (nativeBridge) midiSend(current);
   }
   function midiOnShow(n, fromRemote) {
     if (!midiSends) return;
-    if (!midiSettled) {
-      if (fromRemote) return;
-      midiSettled = true;
+    if (nativeBridge) {
+      if (midiSettled) midiSend(n);
+      return;
+    }
+    if (midiClaimOpen || midiJoinShow) {
+      midiLast = n;
+      return;
     }
     midiSend(n);
   }
@@ -1721,19 +1735,11 @@
       renderMidiStatus(nativeBridge ? 'MIDI: sent by the app' : 'MIDI: waiting for the audience window');
     }
     if (!midiSends || nativeBridge) return;
-    // In step once a reply to this window's hello lands, or after 1.5 s if
-    // none does (no other window open). A reply that comes later still moves
-    // the window, and the new slide then sends as a normal change. Nothing
-    // is sent in those first 1.5 s (see midiClaimOpen): what would have gone
-    // out then goes out at the end, if this window is still the sender.
+    // After 1.5 s this window may send later changes, if no older window
+    // has claimed sending by then. Nothing it showed before is sent.
     setTimeout(() => {
       midiClaimOpen = false;
-      if (!midiSettled) { midiSettle(); return; }
-      if (midiPending !== null) {
-        const n = midiPending;
-        midiPending = null;
-        if (n === current) midiSend(n);
-      }
+      midiSettle();
     }, 1500);
     post({ type: 'midi-claim', since: midiSince });
     window.addEventListener('pagehide', () => post({ type: 'midi-release' }));
