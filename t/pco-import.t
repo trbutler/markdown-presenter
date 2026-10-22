@@ -50,12 +50,12 @@ my @headings = $md =~ /^# (.+)$/mg;
 is_deeply(\@headings, ['Gathering', ('Morning Mercy') x 6, 'The Word', 'Mission update', 'Prayer', 'Bells'], 'items sorted by sequence, song repeats preserved');
 my @lyrics = map { /# Morning Mercy\n\n([^\n]+)/ ? $1 : () } @slides;
 is_deeply(\@lyrics, ['Morning light upon the hill', 'Grace is new with every dawn', 'Through the streets we bear your peace', 'Grace is new with every dawn', 'We will walk in kindness', 'Grace is new with every dawn'], 'verse/chorus/bridge follow arrangement sequence');
-like($md, qr/!scripture John 3:16-18 \(KJV\)/, 'title scripture with plan translation');
-like($md, qr/!scripture Psalm 23:1 \(WEB\)/, 'reference scripture with item translation');
+like($md, qr/!scripture John 3:16-18 \(KJV\)/, 'Scripture-prefixed item title uses default KJV');
+like($md, qr/!scripture Psalm 23:1 \(KJV\)/, 'bare Bible reference item title uses default KJV');
 like($md, qr/Note:\nPiano introduction, then everyone\.\n\nWorship leader:.*\nLet the last chord ring\.\n<!-- \/notes -->/, 'description and multiline related notes');
 like($md, qr/!scripture John.*\n\nNote:\nInvite.*\n\nReader:/, 'scripture notes attached to scripture block');
-like($md, qr/# Bells\n\n\/\/ pcoWarning: Unsupported item type 'custom_cue'/, 'unknown item heading and clear comment');
-like($md, qr/# Mission update.*?manual completion required/s, 'media placeholder retained');
+like($md, qr/# Bells\n\nNote:\nRing three times\./, 'ordinary documented item retains its heading and notes');
+like($md, qr/# Mission update\n\n\/\/ pcoWarning: Media is not imported; add a local media file before presenting\.\n\n\[PCO import: manual completion required\]/, 'documented media item becomes a visible placeholder');
 
 my $outFile = "$temp/service.md";
 ($rc, my $stdout) = runImport('--fixture', $fixture, '--output', $outFile);
@@ -72,8 +72,10 @@ my @bad = (
     ['duplicate sequence', sub { $_[0]{data}[0]{attributes}{sequence} = 1 }, qr/duplicate Item sequence/],
     ['missing included arrangement', sub { $_[0]{included} = [grep { $_->{type} ne 'Arrangement' } @{ $_[0]{included} }] }, qr/missing included Arrangement/],
     ['bad sequence label', sub { $_[0]{included}[1]{attributes}{sequence} = ['Verse 9'] }, qr/missing lyric section/],
-    ['bad translation', sub { $_[0]{meta}{plan}{translation} = 'KJV; echo nope' }, qr/SWORD module/],
-    ['bad notes shape', sub { $_[0]{data}[3]{relationships}{notes}{data} = {} }, qr/notes relationship must be an array/],
+    ['invalid prefixed reference', sub { $_[0]{data}[2]{attributes}{title} = 'Scripture: Not a Bible reference' }, qr/invalid scripture reference in Item title/],
+    ['non-array arrangement sequence', sub { $_[0]{included}[1]{attributes}{sequence} = 'Bridge, Chorus' }, qr/Arrangement sequence must be an array/],
+    ['non-text note content', sub { $_[0]{included}[2]{attributes}{content} = {} }, qr/ItemNote content must be text/],
+    ['bad notes shape', sub { $_[0]{data}[3]{relationships}{item_notes}{data} = {} }, qr/item_notes relationship must be an array/],
 );
 for my $case (@bad) {
     my $file = changedFixture($case->[1]);
@@ -101,10 +103,48 @@ my $paragraphs = changedFixture(sub {
 ($rc, $stdout) = runImport('--fixture', $paragraphs);
 is($rc, 0, 'unlabelled lyrics without sequence accepted');
 is(scalar(() = $stdout =~ /^# Morning Mercy$/mg), 2, 'blank lines split lyric slides');
-my $stringSequence = changedFixture(sub { $_[0]{included}[1]{attributes}{sequence} = 'Bridge, Chorus, Verse 1' });
-($rc, $stdout) = runImport('--fixture', $stringSequence);
-is($rc, 0, 'comma-separated arrangement sequence accepted');
-like($stdout, qr/# Morning Mercy\n\nWe will walk in kindness/, 'string sequence controls first section');
+my $arraySequence = changedFixture(sub { $_[0]{included}[1]{attributes}{sequence} = ['Bridge', 'Chorus', 'Verse 1'] });
+($rc, $stdout) = runImport('--fixture', $arraySequence);
+is($rc, 0, 'documented array arrangement sequence accepted');
+like($stdout, qr/# Morning Mercy\n\nWe will walk in kindness/, 'array sequence controls first section');
+
+($rc, $stdout, $err) = runImport('--fixture', $fixture, '--translation', 'WEB');
+is($rc, 0, 'translation CLI option accepted');
+is($err, '', 'translation option produces no warnings');
+like($stdout, qr/!scripture John 3:16-18 \(WEB\)/, 'CLI translation applies to prefixed title');
+like($stdout, qr/!scripture Psalm 23:1 \(WEB\)/, 'CLI translation applies to bare reference');
+for my $translation ('KJV; echo nope', '', 'K J V') {
+    ($rc, $stdout, $err) = runImport('--fixture', $fixture, '--translation', $translation, '--output', $outFile);
+    isnt($rc, 0, 'invalid CLI translation refused');
+    is($stdout, '', 'invalid translation produces no partial stdout');
+    like($err, qr/translation.*(?:SWORD module|nonempty single line)/, 'invalid translation has useful error');
+}
+
+my $undocumented = changedFixture(sub {
+    $_[0]{meta}{plan}{translation} = { ignored => 1 };
+    $_[0]{data}[2]{attributes}{scripture_reference} = 'Genesis 1:1';
+    $_[0]{data}[2]{attributes}{translation} = 'ASV';
+    $_[0]{data}[5]{attributes}{translation} = 'invalid; ignored';
+    $_[0]{data}[6]{attributes}{scripture_reference} = 'Genesis 1:1';
+    $_[0]{data}[3]{relationships}{notes}{data} = [{ type => 'ItemNote', id => 'missing' }];
+});
+($rc, $stdout, $err) = runImport('--fixture', $undocumented);
+is($rc, 0, 'undocumented fields and legacy notes relationship are ignored');
+is($stdout, $md, 'undocumented fields cannot alter title detection, translation or notes');
+($rc, $stdout) = runImport('--fixture', $undocumented, '--translation', 'WEB');
+is($rc, 0, 'CLI translation works with undocumented fixture fields present');
+like($stdout, qr/!scripture John 3:16-18 \(WEB\)/, 'only CLI chooses translation despite legacy fields');
+
+for my $case (['1 Jn 1:9', '!scripture 1 John 1:9 (KJV)'], ['Mission 2026', '# Mission 2026'], ['John 22:1', '# John 22:1']) {
+    my $file = changedFixture(sub { $_[0]{data}[6]{attributes}{title} = $case->[0] });
+    ($rc, $stdout) = runImport('--fixture', $file);
+    is($rc, 0, "item title '$case->[0]' imported");
+    like($stdout, qr/^\Q$case->[1]\E$/m, 'only a valid Bible reference becomes a scripture directive');
+}
+my $unknown = changedFixture(sub { $_[0]{data}[7]{attributes}{item_type} = 'custom_cue' });
+($rc, $stdout) = runImport('--fixture', $unknown);
+is($rc, 0, 'unknown type is preserved for manual completion');
+like($stdout, qr/# Bells\n\n\/\/ pcoWarning: Unsupported item type 'custom_cue'/, 'undocumented type receives a placeholder, not a special mapping');
 
 my $literalText = changedFixture(sub {
     $_[0]{data}[3]{attributes}{description} = "!include missing.md\n---\n<!-- /notes -->\nA & B";
