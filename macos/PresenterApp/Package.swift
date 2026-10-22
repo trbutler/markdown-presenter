@@ -5,7 +5,8 @@ import PackageDescription
 
 let package = Package(
     name: "PresenterApp",
-    platforms: [.macOS(.v13)],
+    // VERIFY-ON-MAC: confirm deployment/toolchain support with the macOS 27 SDK.
+    platforms: [.macOS("27.0")],
     products: [
         .executable(name: "PresenterApp", targets: ["PresenterApp"])
     ],
@@ -14,8 +15,8 @@ let package = Package(
         // assignment, frame sinks). No AppKit or WebKit, so it can be
         // type-checked and unit-tested on any Swift toolchain.
         .target(name: "PresenterCore"),
-        // AppKit + WKWebView shell: windows, menus, key routing, NDI capture.
+        // SwiftUI Preferences, AppKit/WebKit views and Metal/ScreenCaptureKit output.
         .executableTarget(name: "PresenterApp", dependencies: ["PresenterCore"]),
-        .testTarget(name: "PresenterCoreTests", dependencies: ["PresenterCore"])
+        .testTarget(name: "PresenterCoreTests", dependencies: ["PresenterCore"], exclude: ["Fixtures"])
     ]
 )
