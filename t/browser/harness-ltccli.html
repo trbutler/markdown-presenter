@@ -208,17 +208,18 @@
     check('late timing: the late window joined', joined3, at(late3));
     check('late timing: a window joining after buildOut starts with it down', !ltOn(late3) && lt(late3).classList.contains('is-out'), lt(late3) && lt(late3).className);
     key(late3, 'l');
-    await waitFor(() => ltOn(a2));
-    check('late timing: L in that window then shows it everywhere', ltOn(a2) && ltOn(late2) && ltOn(late3), [ltOn(a2), ltOn(late2), ltOn(late3)]);
+    const all3 = await waitFor(() => ltOn(a2) && ltOn(late2) && ltOn(late3));
+    check('late timing: L in that window then shows it everywhere', all3, [ltOn(a2), ltOn(late2), ltOn(late3)]);
 
     // A reply to an older hello must not undo a manual L made since: a lone
     // window's hello goes unanswered, L is pressed, then a stale automatic
-    // reply (timing long past buildOut) arrives for that hello.
+    // reply (timing long past buildOut) arrives for that hello. The deck's
+    // own timing is minutes away, so only L and the reply can move it.
     clear();
-    const spy = new BroadcastChannel('mdp:' + new URL(decks.lt).pathname);
+    const spy = new BroadcastChannel('mdp:' + new URL(decks.ltm).pathname);
     let hello = null;
     spy.onmessage = (e) => { if (e.data && e.data.type === 'hello') hello = e.data.nonce; };
-    const solo = await frame('lt', '', '#2');
+    const solo = await frame('ltm', '', '#2');
     const asked = await waitFor(() => hello !== null);
     key(solo, 'l');
     check('stale reply: L shows it in a lone window', asked && ltOn(solo), [asked, ltOn(solo)]);
@@ -231,7 +232,7 @@
       await waitFor(() => !solo.document.body.classList.contains('blacked'));
       return seen;
     };
-    spy.postMessage({ type: 'show', reply: true, nonce: hello, n: 1, node: 1, black: false, lowerThird: null, lowerStart: Date.now() - 20000, from: 'spy' });
+    spy.postMessage({ type: 'show', reply: true, nonce: hello, n: 1, node: 1, black: false, lowerThird: null, lowerStart: Date.now() - 1000000, from: 'spy' });
     const done = await handled();
     check('stale reply: an older automatic reply does not take a newer manual L down', done && ltOn(solo), [done, lt(solo) && lt(solo).className]);
     spy.close();
