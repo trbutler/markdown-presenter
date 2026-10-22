@@ -150,7 +150,7 @@ sub build_model {
         my $dir = $slide->{dir};
 
         foreach my $unknown (sort keys %$dir) {
-            next if $unknown =~ /^(seed|autoAdvance|loop|fade|audio|type|section|insert|position|video|backdrop|name|title|buildIn|buildOut|translation|countdown|countdownEnd|cycle)$/;
+            next if $unknown =~ /^(seed|autoAdvance|loop|fade|audio|type|section|insert|position|video|backdrop|name|title|buildIn|buildOut|translation|countdown|countdownEnd|cycle|midi|midiOut)$/;
             warn "Unknown directive //$unknown\n";
         }
 
@@ -161,6 +161,13 @@ sub build_model {
         $deck{autoAdvance} = duration_ms($dir->{autoAdvance}) if exists $dir->{autoAdvance};
         $deck{loop} = boolish($dir->{loop}) ? JSON::PP::true : JSON::PP::false if exists $dir->{loop};
         $deck{fadeMs} = duration_ms($dir->{fade}) if exists $dir->{fade};
+        # MIDI (hub 1213 d): // midi: pc|cc|note|off belongs to this slide;
+        # any other // midi: (or // midiOut:) turns MIDI on for the deck.
+        if (exists $dir->{midi} && midi_slide_spec($dir->{midi})) {
+            $slide->{midi} = midi_slide_spec($dir->{midi});
+        } elsif (exists $dir->{midi} || exists $dir->{midiOut}) {
+            $deck{midi} = midi_deck($dir->{midi}, $dir->{midiOut});
+        }
 
         if (exists $dir->{type} && defined $dir->{type} && $dir->{type} eq 'fillers') {
             $mode = 'filler';
@@ -275,6 +282,7 @@ sub render {
         audio       => $model->{deck}{audio},
         sections    => \@section_json,
     };
+    $config->{midi} = $model->{deck}{midi} if $model->{deck}{midi};
     my $json = JSON::PP->new->ascii->canonical->encode($config);
     $json =~ s/</\\u003c/g;
 
@@ -282,6 +290,35 @@ sub render {
     $template =~ s/<!-- SLIDES_PLACEHOLDER -->/$slides/;
     $template =~ s|/\* DECK_CONFIG \*/|$json|;
     return $template;
+}
+
+# A per-slide // midi: value, normalised, or undef if it is a deck setting.
+# pc [ch] program, cc [ch] control value, note [ch] number, or off.
+sub midi_slide_spec {
+    my ($value) = @_;
+    return undef unless defined $value;
+    my $spec = join ' ', split ' ', $value;
+    return undef unless $spec =~ /^(?:pc|cc|note|off)\b/;
+    die "Bad // midi: $value (use pc [channel] program, cc [channel] control value, note [channel] number, or off)\n"
+        unless $spec =~ /^(?:off|pc(?: \d+){1,2}|cc(?: \d+){2,3}|note(?: \d+){1,2})$/;
+    return $spec;
+}
+
+# The deck's MIDI settings: // midi: out="port name part" channel=1, or
+# // midiOut: port name part. Channel 1-16, default 1.
+sub midi_deck {
+    my ($value, $out) = @_;
+    my %midi = (out => (defined $out ? $out : ''), channel => 1);
+    $value = '' unless defined $value;
+    if ($value =~ /\bout\s*=\s*"([^"]*)"/ || $value =~ /\bout\s*=\s*(\S+)/) {
+        $midi{out} = $1;
+    }
+    if ($value =~ /\bchannel\s*=\s*(\S+)/) {
+        my $ch = $1;
+        die "Bad // midi channel: $ch (1-16)\n" unless $ch =~ /^\d+$/ && $ch >= 1 && $ch <= 16;
+        $midi{channel} = int($ch);
+    }
+    return \%midi;
 }
 
 sub slide_html {
@@ -295,6 +332,7 @@ sub slide_html {
     push @attrs, 'data-section-index="' . esc($section_index) . '"' if $section_index ne '';
     push @attrs, 'data-section="' . esc($section_name) . '"' if defined $section_name && $section_name ne '';
     push @attrs, 'data-glued="1"' if $slide->{glued};
+    push @attrs, 'data-midi="' . esc($slide->{midi}) . '"' if $slide->{midi};
 
     if ($kind eq 'video') {
         my $src = esc($slide->{video});

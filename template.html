@@ -401,6 +401,18 @@
     text-align: center;
   }
   .view-lyrics .empty-deck, .view-overlay .empty-deck { display: none; }
+  /* MIDI status: created only for a // midi: deck, in notes and service. */
+  .midi-status {
+    position: fixed;
+    top: 8px;
+    right: 12px;
+    z-index: 60;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #ddd;
+    font: 12px/1.6 system-ui, sans-serif;
+  }
 
   .countdown {
     position: fixed;
@@ -757,11 +769,26 @@
         // In step now (the answer, or a newer live move): a slower reply to
         // the same hello must not pull this window back.
         pendingHello = null;
+        // The answer to this window's hello: it is in step, so MIDI may send.
+        if (msg.reply) midiSettle();
       } else if (msg.type === 'black') {
         setBlack(!!msg.on, true);
       } else if (msg.type === 'timer') {
         if (typeof msg.start === 'number') timerStart = msg.start;
+      } else if (msg.type === 'midi-claim') {
+        if (!midiClaims.has(msg.from)) {
+          midiClaims.set(msg.from, msg.since);
+          if (midiSends) post({ type: 'midi-claim', since: midiSince });
+        }
+      } else if (msg.type === 'midi-release') {
+        midiClaims.delete(msg.from);
+      } else if (msg.type === 'midi-status') {
+        renderMidiStatus(msg.text);
       } else if (msg.type === 'hello') {
+        if (midiSends) {
+          post({ type: 'midi-claim', since: midiSince });
+          if (midiStatusText) post({ type: 'midi-status', text: midiStatusText });
+        }
         post({ type: 'show', reply: true, nonce: msg.nonce, n: current, node: nodeIndex(playOrder[current] && playOrder[current].slide), black: blacked, timerStart: timerStart });
       }
     };
@@ -806,6 +833,8 @@
     // so digits typed before then must not turn a later Enter into a jump.
     typed = '';
     document.documentElement.classList.remove('native-waiting');
+    midiApplied = true;
+    midiSettle();
     tick();
   }
 
@@ -1048,6 +1077,7 @@
   }
 
   function afterShow(n, fromRemote) {
+    midiOnShow(n, fromRemote);
     updateNotes();
     markService();
     tick();
@@ -1472,6 +1502,162 @@
     if (player.src) player.play().catch(() => {});
   }
 
+  // ---- MIDI on slide change (hub 1213 d) ---------------------------------
+  // Off unless the deck has // midi: (or // midiOut:); without it the page
+  // never asks for MIDI access. Only the audience view sends, once per slide
+  // change, whoever moved the show (a key, a timer, another window, the app).
+  // A slide's own // midi: pc|cc|note wins; otherwise the slide sends a
+  // program change equal to its play-order index (0-based, fillers included),
+  // clamped to 0-127. Black sends nothing; a move under black still sends.
+  // In the app the page posts {type: 'midi', ...} to Swift instead of using
+  // Web MIDI (Swift side: TODO). Failures only show in notes and service.
+  const midiDeck = deck.midi || null;
+  const midiSends = !!midiDeck && view === 'audience';
+  const midiSince = Date.now();
+  const midiClaims = new Map();
+  let midiOutput = null;
+  let midiPending = null;
+  let midiSettled = false;
+  let midiApplied = false;
+  let midiLast = -1;
+  let midiStatusText = '';
+  // A new audience window first listens for 1.5 s for an older one (which
+  // keeps sending); only then may it send, so two never send at once.
+  let midiClaimOpen = true;
+
+  const clamp7 = (x) => Math.max(0, Math.min(127, Math.round(Number(x)) || 0));
+  function midiChannel(ch) {
+    const c = Math.round(Number(ch));
+    return (c >= 1 && c <= 16 ? c : 1) - 1;
+  }
+  function midiMessages(n) {
+    const item = playOrder[n];
+    if (!item) return [];
+    const spec = (item.slide.dataset.midi || '').trim().split(/\s+/).filter(Boolean);
+    const deckChannel = midiDeck.channel;
+    if (!spec.length) return [{ bytes: [0xC0 | midiChannel(deckChannel), clamp7(n)], delayMs: 0 }];
+    const args = spec.slice(1);
+    if (spec[0] === 'pc') {
+      const [ch, value] = args.length >= 2 ? args : [deckChannel, args[0]];
+      return [{ bytes: [0xC0 | midiChannel(ch), clamp7(value)], delayMs: 0 }];
+    }
+    if (spec[0] === 'cc') {
+      const [ch, control, value] = args.length >= 3 ? args : [deckChannel, args[0], args[1]];
+      return [{ bytes: [0xB0 | midiChannel(ch), clamp7(control), clamp7(value)], delayMs: 0 }];
+    }
+    if (spec[0] === 'note') {
+      const [ch, noteNumber] = args.length >= 2 ? args : [deckChannel, args[0]];
+      const c = midiChannel(ch);
+      return [
+        { bytes: [0x90 | c, clamp7(noteNumber), 100], delayMs: 0 },
+        { bytes: [0x80 | c, clamp7(noteNumber), 0], delayMs: 200 },
+      ];
+    }
+    return [];
+  }
+  // Two audience windows in one browser: the one opened first sends.
+  function midiOwner() {
+    for (const [id, since] of midiClaims) {
+      if (since < midiSince || (since === midiSince && id < peerId)) return false;
+    }
+    return true;
+  }
+  function midiStatus(text) {
+    midiStatusText = text;
+    post({ type: 'midi-status', text: text });
+  }
+  function renderMidiStatus(text) {
+    if (!midiDeck || (view !== 'notes' && view !== 'service')) return;
+    let el = document.getElementById('midiStatus');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'midi-status';
+      el.id = 'midiStatus';
+      el.setAttribute('role', 'status');
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+  }
+  function midiSend(n) {
+    if (!midiSends || n === midiLast || !playOrder[n]) return;
+    if (nativeBridge) {
+      midiLast = n;
+      const messages = midiMessages(n);
+      if (messages.length) nativeBridge.postMessage({ type: 'midi', index: n, out: midiDeck.out || '', messages: messages });
+      return;
+    }
+    if (midiClaimOpen || !midiOutput) { midiPending = n; return; }
+    if (!midiOwner()) { midiPending = null; return; }
+    midiLast = n;
+    const t0 = performance.now();
+    midiMessages(n).forEach(m => {
+      try { midiOutput.send(m.bytes, t0 + m.delayMs); } catch (err) { midiStatus('MIDI: send failed (' + err.message + ')'); }
+    });
+  }
+  // The first slide goes out once this window is in step: after the join
+  // window in a browser, after Swift's first apply in the app. A late window
+  // never sends the slide it opened on before it learns the live one.
+  function midiSettle() {
+    if (!midiSends || midiSettled) return;
+    if (nativeBridge && !midiApplied) return;
+    midiSettled = true;
+    midiSend(current);
+  }
+  function midiOnShow(n, fromRemote) {
+    if (!midiSends) return;
+    if (!midiSettled) {
+      if (fromRemote) return;
+      midiSettled = true;
+    }
+    midiSend(n);
+  }
+  function midiInit() {
+    if (midiDeck && (view === 'notes' || view === 'service')) {
+      renderMidiStatus(nativeBridge ? 'MIDI: sent by the app' : 'MIDI: waiting for the audience window');
+    }
+    if (!midiSends || nativeBridge) return;
+    // In step once a reply to this window's hello lands, or after 1.5 s if
+    // none does (no other window open). A reply that comes later still moves
+    // the window, and the new slide then sends as a normal change. Nothing
+    // is sent in those first 1.5 s (see midiClaimOpen): what would have gone
+    // out then goes out at the end, if this window is still the sender.
+    setTimeout(() => {
+      midiClaimOpen = false;
+      if (!midiSettled) { midiSettle(); return; }
+      if (midiPending !== null) {
+        const n = midiPending;
+        midiPending = null;
+        if (n === current) midiSend(n);
+      }
+    }, 1500);
+    post({ type: 'midi-claim', since: midiSince });
+    window.addEventListener('pagehide', () => post({ type: 'midi-release' }));
+    if (!navigator.requestMIDIAccess) {
+      midiStatus('MIDI: not available in this browser (Chrome or Edge, from http://localhost)');
+      return;
+    }
+    navigator.requestMIDIAccess({ sysex: false }).then((access) => {
+      const pick = () => {
+        const want = String(midiDeck.out || '').toLowerCase();
+        let found = null;
+        for (const port of access.outputs.values()) {
+          if (!want || String(port.name || '').toLowerCase().includes(want)) { found = port; break; }
+        }
+        midiOutput = found;
+        midiStatus(found ? 'MIDI: ' + found.name : 'MIDI: no output' + (want ? ' matching "' + midiDeck.out + '"' : ''));
+        if (found && midiPending !== null) {
+          const n = midiPending;
+          midiPending = null;
+          if (n === current) midiSend(n);
+        }
+      };
+      pick();
+      access.onstatechange = pick;
+    }, (err) => {
+      midiStatus('MIDI: ' + (err && err.name === 'SecurityError' ? 'permission denied' : 'unavailable') + '; the show runs without it');
+    });
+  }
+
   const transportActions = { prev: prevSlide, next: nextSlide, black: toggleBlack, timer: resetTimer };
   transport.querySelectorAll('[data-act]').forEach(button => {
     button.addEventListener('click', () => transportActions[button.dataset.act]());
@@ -1507,6 +1693,7 @@
     pendingHello = Math.random().toString(36).slice(2) + Date.now().toString(36);
     post({ type: 'hello', nonce: pendingHello });
   }
+  midiInit();
   if (nativeBridge) {
     nativeBridge.postMessage({
       type: 'ready',

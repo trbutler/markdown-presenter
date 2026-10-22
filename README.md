@@ -107,9 +107,31 @@ Pre-service and post-service loops are sections:
 
 `confidence` and `control` are the macOS app's names (`docs/1214-macos-app-design.md`); they open the same views. An unknown name opens the audience view.
 
-Only the audience view makes sound. Windows of the same deck follow each other in one browser (BroadcastChannel), so the projector can show the plain page while the laptop shows `?view=notes` or `?view=service`, and either one drives. A window opened late joins on the current slide and the running timer.
+Only the audience view makes sound. Windows of the same deck follow each other in one browser (BroadcastChannel), so the projector can show the plain page while the laptop shows `?view=notes` or `?view=service`, and either one drives. A window opened late joins on the current slide and the running timer: its hello carries a nonce, and only the answer to that hello moves it, however late the answer comes. Answers to other windows' hellos are ignored.
 
 Inside the macOS app the windows do not talk to each other: Swift owns the state and pushes it to each with `presenter.apply({index, black, timerStart})`, and a page asks for changes with `{type: 'request', index, black, timerStart}` (`macos/PresenterApp/Sources/PresenterCore/Bridge.swift`). `index` counts the play order, fillers included. Only the audience window runs timers, cycles and countdowns there. Each view starts hidden (audience black, lyrics and overlay transparent) until Swift's first `presenter.apply`, so a reload never flashes slide 1. A deck with no slides shows "This deck has no slides." and still reports `ready` with count 0.
+
+### MIDI on slide change
+
+Off unless the deck asks for it. Without the directive the page never calls `navigator.requestMIDIAccess`, so a normal deck never shows a permission prompt.
+
+```
+// midi: out="Lighting" channel=1
+```
+
+turns it on: `out` is part of the output port's name (any port if left out), `channel` is 1-16 (default 1). `// midiOut: Lighting` is the same with channel 1. On each slide change the show then sends a program change equal to the slide's place in the play order (counting from 0, fillers included), capped at 127. A slide can send something else instead:
+
+```
+// midi: pc 5          program change 5 (pc 2 5: on channel 2)
+// midi: cc 20 127     control change 20, value 127 (cc 2 20 127: channel 2)
+// midi: note 60       note 60, velocity 100, off 200 ms later (note 2 60: channel 2)
+// midi: off           nothing for this slide
+```
+
+- Only the audience view sends, once per slide change, whoever moved the show: a key, a timer, a cycle, a countdown, or another window. Opening the deck sends the current slide once the window is in step (after the answer to its hello, or 1.5 seconds). Pressing B sends nothing; a move under black still sends.
+- With two audience windows open in one browser, the one opened first sends. A newly opened audience window sends nothing for its first 1.5 seconds while it hears from older ones. If the older window is a background tab that does not answer within that time, the new one can send its start slide once.
+- Web MIDI needs Chrome or Edge (Firefox 108+ with permission; not Safari) and a secure page, so serve the deck from `http://localhost` (for example `python3 -m http.server`) rather than opening the file. If MIDI is denied or missing, the show runs anyway and the notes and service views say why at the top right.
+- Inside the macOS app the page does not use Web MIDI. The audience view posts `{type: 'midi', index, out, messages: [{bytes, delayMs}]}` to Swift instead. Sending it from Swift is still to do (Bridge.swift ignores unknown messages today).
 
 ### Keys
 

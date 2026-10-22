@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Presenter MIDI checks</title>
+</head>
+<body>
+<pre id="result">pending</pre>
+<script>
+  // Loaded by t/07-midi.t in headless Chromium. Each deck is loaded once as a
+  // blob with a test script injected at the top of <head>, and every frame of
+  // that deck reuses the blob URL, so frames share one BroadcastChannel. The
+  // script reads its set-up from the iframe element: data-view, data-midi
+  // (ok | deny | none: a fake navigator.requestMIDIAccess) and data-native (a
+  // fake WebKit message handler). Writes one JSON line of results to #result.
+  const q = new URLSearchParams(location.search);
+  const checks = [];
+  const check = (name, ok, got) => checks.push({ name, ok: !!ok, got: got === undefined ? null : String(got) });
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  async function waitFor(cond, tries) {
+    for (let i = 0; i < (tries || 200); i++) {
+      if (cond()) return true;
+      await sleep(20);
+    }
+    return cond();
+  }
+  const inject = '<script>(function () {' +
+    'var f = window.frameElement, d = (f && f.dataset) || {};' +
+    'window.__presenterView = d.view || "audience";' +
+    'window.__midiReq = 0; window.__sent = []; window.__msgs = []; window.__errs = [];' +
+    'window.addEventListener("error", function (e) { window.__errs.push(String(e.message)); });' +
+    'if (d.native) window.webkit = { messageHandlers: { presenter: { postMessage: function (m) { window.__msgs.push(JSON.parse(JSON.stringify(m))); } } } };' +
+    'if (d.midi === "none") { try { Object.defineProperty(navigator, "requestMIDIAccess", { value: undefined, configurable: true }); } catch (e) {} return; }' +
+    'Object.defineProperty(navigator, "requestMIDIAccess", { configurable: true, value: function (opts) {' +
+    '  window.__midiReq++;' +
+    '  if (d.midi === "deny") return Promise.reject(new DOMException("denied", "SecurityError"));' +
+    '  var other = { id: "o1", name: "Other Synth", send: function () { window.__sent.push({ wrongPort: true }); } };' +
+    '  var fake = { id: "o2", name: "Fake Port", send: function (bytes, at) { window.__sent.push({ bytes: Array.from(bytes), at: at || 0 }); } };' +
+    '  return Promise.resolve({ outputs: new Map([["o1", other], ["o2", fake]]), inputs: new Map(), onstatechange: null });' +
+    '} });' +
+    '})();<\/script>';
+  const blobs = {};
+  function deckBlob(name) {
+    if (blobs[name]) return Promise.resolve(blobs[name]);
+    return new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest();
+      x.open('GET', q.get(name));
+      x.onload = () => {
+        const html = x.responseText.replace('<head>', '<head>' + inject);
+        blobs[name] = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+        resolve(blobs[name]);
+      };
+      x.onerror = () => reject(new Error('cannot read ' + name));
+      x.send();
+    });
+  }
+  function clear() { document.querySelectorAll('iframe').forEach(f => f.remove()); }
+  async function frame(name, opts, keep) {
+    if (!keep) clear();
+    const url = await deckBlob(name);
+    return new Promise((resolve) => {
+      const f = document.createElement('iframe');
+      f.style.width = '1280px';
+      f.style.height = '720px';
+      Object.entries(opts || {}).forEach(([k, v]) => { f.dataset[k] = v; });
+      f.onload = () => resolve(f.contentWindow);
+      f.src = url + ((opts && opts.hash) || '');
+      document.body.appendChild(f);
+    });
+  }
+  function key(win, k) {
+    win.document.dispatchEvent(new win.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+  }
+  const idx = (win) => win.presenter.state().index;
+  const bytes = (win) => JSON.stringify(win.__sent.map(s => s.bytes));
+  const midiStatus = (win) => { const el = win.document.getElementById('midiStatus'); return el ? el.textContent : null; };
+
+  async function run() {
+    // No // midi: in the deck: no MIDI access is ever requested.
+    let w = await frame('plain', { midi: 'ok', hash: '#1' });
+    await sleep(1700);
+    key(w, 'PageDown'); key(w, 'PageDown');
+    await sleep(100);
+    check('plain deck: no MIDI access requested', w.__midiReq === 0 && w.__sent.length === 0, w.__midiReq);
+    let n = await frame('plain', { midi: 'ok', view: 'notes' }, true);
+    await sleep(200);
+    check('plain deck: no MIDI status in notes', midiStatus(n) === null, midiStatus(n));
+
+    // One audience window: the first slide goes out once in step, then one
+    // message per change, with the right bytes, to the matching port only.
+    w = await frame('midi', { midi: 'ok', hash: '#1' });
+    await sleep(1700);
+    check('midi: access requested once', w.__midiReq === 1, w.__midiReq);
+    check('midi: first slide sends default program change = index 0 on channel 2', bytes(w) === '[[193,0]]', bytes(w));
+    key(w, 'PageDown');
+    check('midi: // midi: pc 9', bytes(w) === '[[193,0],[193,9]]', bytes(w));
+    key(w, 'PageDown');
+    check('midi: // midi: cc 20 127', w.__sent.length === 3 && JSON.stringify(w.__sent[2].bytes) === '[177,20,127]', bytes(w));
+    key(w, 'PageDown');
+    const on = w.__sent[3], off = w.__sent[4];
+    check('midi: // midi: note 3 60 = note on, then note off 200 ms later, channel 3',
+      w.__sent.length === 5 && JSON.stringify(on.bytes) === '[146,60,100]' && JSON.stringify(off.bytes) === '[130,60,0]' && Math.round(off.at - on.at) === 200, bytes(w));
+    key(w, 'PageDown');
+    check('midi: // midi: off sends nothing', w.__sent.length === 5, bytes(w));
+    key(w, 'PageDown');
+    check('midi: pc 300 clamps to 127', w.__sent.length === 6 && JSON.stringify(w.__sent[5].bytes) === '[193,127]', bytes(w));
+    check('midi: never the port that does not match out="fake"', !w.__sent.some(s => s.wrongPort));
+    key(w, 'End');
+    check('midi: End on the last slide (no change) sends nothing', w.__sent.length === 6, bytes(w));
+    // Black sends nothing; Next from black only restores and sends nothing;
+    // the next real change sends once.
+    key(w, 'Home');
+    const beforeBlack = w.__sent.length;
+    key(w, 'b'); key(w, 'PageDown');
+    check('midi: black and un-black send nothing', w.__sent.length === beforeBlack, bytes(w));
+    key(w, 'PageDown');
+    check('midi: next change after black sends once', w.__sent.length === beforeBlack + 1 && JSON.stringify(w.__sent[beforeBlack].bytes) === '[193,9]', bytes(w));
+
+    // Remote moves: notes drives, the audience sends once per change; notes,
+    // service, lyrics and overlay never ask for MIDI or send. A second
+    // audience window opened later stays quiet.
+    const a = await frame('midi', { midi: 'ok', hash: '#1' });
+    await sleep(1700);
+    n = await frame('midi', { midi: 'ok', view: 'notes' }, true);
+    const sv = await frame('midi', { midi: 'ok', view: 'service' }, true);
+    const ly = await frame('midi', { midi: 'ok', view: 'lyrics' }, true);
+    const ov = await frame('midi', { midi: 'ok', view: 'overlay' }, true);
+    const a2 = await frame('midi', { midi: 'ok' }, true);
+    await sleep(1700);
+    const a0 = a.__sent.length, a20 = a2.__sent.length;
+    // Virtual time does not wait for BroadcastChannel, so poll long enough
+    // for the move to land rather than one fixed wait.
+    key(n, 'PageDown');
+    await waitFor(() => idx(a) === 1 && idx(a2) === 1 && a.__sent.length > a0, 600);
+    key(n, 'PageDown');
+    await waitFor(() => idx(a) === 2 && idx(a2) === 2 && a.__sent.length > a0 + 1, 600);
+    await sleep(100);
+    check('remote: audience sends once per change driven from notes', a.__sent.length === a0 + 2 && JSON.stringify(a.__sent.slice(a0).map(s => s.bytes)) === '[[193,9],[177,20,127]]', JSON.stringify(a.__sent.slice(a0).map(s => s.bytes)));
+    // a20 is taken after a2's 1.5 s claim window; its own start slide may go
+    // out once inside headless Chromium's virtual time, which runs that
+    // window out before the older window's claim crosses processes.
+    check('remote: second audience window sends nothing for the changes', a2.__sent.length === a20, a2.__sent.length + ' vs ' + a20);
+    check('remote: notes, service, lyrics, overlay never request MIDI', [n, sv, ly, ov].every(x => x.__midiReq === 0 && x.__sent.length === 0), [n, sv, ly, ov].map(x => x.__midiReq).join(','));
+    check('status: notes shows the audience window\'s MIDI port', /Fake Port/.test(midiStatus(n) || ''), midiStatus(n));
+    check('status: service shows it too', /Fake Port/.test(midiStatus(sv) || ''), midiStatus(sv));
+    check('status: never in audience, lyrics or overlay', midiStatus(a) === null && midiStatus(ly) === null && midiStatus(ov) === null);
+
+    // A timer advance sends too, once.
+    w = await frame('auto', { midi: 'ok', hash: '#1' });
+    await sleep(1700);
+    const t0 = w.__sent.length;
+    await sleep(2400);
+    check('timer: an autoAdvance move sends once', idx(w) >= 1 && w.__sent.length === t0 + idx(w), JSON.stringify(w.__sent.map(s => s.bytes)) + ' at ' + idx(w));
+
+    // Denied or missing Web MIDI: the show runs; notes says so.
+    w = await frame('midi', { midi: 'deny', hash: '#1' });
+    n = await frame('midi', { midi: 'deny', view: 'notes' }, true);
+    await sleep(1700);
+    key(w, 'PageDown');
+    check('denied: the show still moves', idx(w) === 1 && w.__errs.length === 0, w.__errs.join(' | '));
+    await waitFor(() => /denied/.test(midiStatus(n) || ''));
+    check('denied: notes shows permission denied', /permission denied/.test(midiStatus(n) || ''), midiStatus(n));
+    w = await frame('midi', { midi: 'none', hash: '#1' });
+    n = await frame('midi', { midi: 'none', view: 'service' }, true);
+    await sleep(1700);
+    key(w, 'PageDown');
+    await waitFor(() => /not available/.test(midiStatus(n) || ''));
+    check('no Web MIDI: show moves, service says not available', idx(w) === 1 && /not available/.test(midiStatus(n) || ''), midiStatus(n));
+
+    // In the app: no Web MIDI; the audience posts {type: 'midi'} to Swift,
+    // once per applied change, starting with the first apply.
+    w = await frame('midi', { midi: 'ok', native: '1' });
+    await sleep(300);
+    check('app: nothing before the first apply', w.__msgs.filter(m => m.type === 'midi').length === 0, JSON.stringify(w.__msgs));
+    w.presenter.apply({ index: 0, black: false, timerStart: Date.now() }, 'token-1');
+    w.presenter.apply({ index: 1, black: false, timerStart: Date.now() }, 'token-2');
+    w.presenter.apply({ index: 1, black: true, timerStart: Date.now() }, 'token-3');
+    const mm = w.__msgs.filter(m => m.type === 'midi');
+    check('app: posts midi to the bridge, once per change', mm.length === 2 && mm[0].index === 0 && JSON.stringify(mm[1].messages[0].bytes) === '[193,9]' && mm[1].out === 'fake', JSON.stringify(mm));
+    check('app: never asks for Web MIDI', w.__midiReq === 0, w.__midiReq);
+    n = await frame('midi', { midi: 'ok', native: '1', view: 'confidence' });
+    await sleep(200);
+    n.presenter.apply({ index: 1, black: false, timerStart: Date.now() });
+    check('app: the confidence view posts no midi', n.__msgs.filter(m => m.type === 'midi').length === 0 && n.__midiReq === 0);
+  }
+
+  run().then(() => {
+    document.getElementById('result').textContent = JSON.stringify(checks);
+  }).catch((err) => {
+    checks.push({ name: 'harness error', ok: false, got: String(err && err.stack || err) });
+    document.getElementById('result').textContent = JSON.stringify(checks);
+  });
+</script>
+</body>
+</html>

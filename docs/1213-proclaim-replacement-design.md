@@ -13,7 +13,7 @@ Compatibility with hub 1214 (the native macOS app): views are chosen with `?view
 | a | Songs from Planning Center Services (preferred) or CCLI SongSelect | 2 | designed below; CCLI direct is not feasible |
 | b | Scripture via SWORD/diatheke | 1 | built: `!scripture John 3:16-18 (KJV)`; parser tested; diatheke not installed on dawnredwood |
 | c | PowerPoint/Proclaim keys, clicker-safe; service view for jumping | 1 | built |
-| d | MIDI on slide change (Web MIDI) | 2 | designed below |
+| d | MIDI on slide change (Web MIDI) | 2 | built (browser): `// midi:`; macOS app side posts to Swift, sending there is TODO |
 | e | Lower thirds | 1 (exists) / 2 | Tim's video-slide lower third already works and shows in `view=overlay`; manual trigger designed |
 | f | CSS display variants (lyrics-only for OBS) | 1 | built: `lyrics`, `overlay` |
 | g | Presenter notes view; notes hidden elsewhere | 1 | built |
@@ -65,7 +65,17 @@ Secrets (PCO token):
 - Proposed: `// ccli: 1234567` at deck level. A song slide's last page gets a small footer line with the song's copyright line and `CCLI License #1234567`. The importer writes each song's `ccli_number` and copyright line into a directive. A run log, `services/ccli-log.csv`, lists date, song and CCLI number to help with reporting. Automatic reporting is out of scope without CCLI API access.
 - Livestream (the OBS lyrics view): showing lyrics in a stream needs the separate CCLI Streaming License (https://www.vineyardchurches.org.uk/?p=18464, a UK source; check the US terms).
 
-### Phase 2: MIDI on slide change (designed, not built)
+### Phase 2: MIDI on slide change (built for the browser; see README "MIDI on slide change")
+
+As built (branch `review/indclaude-1213-midi`):
+
+- The deck turns it on with `// midi: out="<port name part>" channel=1` (or `// midiOut: <port name part>`, as designed below). Without it the page never asks for MIDI access.
+- A slide's `// midi: pc|cc|note` takes the designed form with the channel, or the short form without it (deck channel). `// midi: off` sends nothing. A slide with no `// midi:` sends a program change equal to its play-order index, clamped to 0-127.
+- Only the audience window sends, once per change, after the move settles; re-showing the same slide does not send again. Two audience windows in one browser elect the one opened first.
+- In the macOS app the page posts `{type: 'midi', index, out, messages}` to Swift; Swift sending it is still to do.
+
+The original design follows.
+
 
 - Directive `// midi: pc 1 5` (program change, channel 1, program 5), `// midi: note 1 60` or `// midi: cc 1 20 127`, on the slide that should send it. A deck-level `// midiOut: <port name substring>` picks the port.
 - Only the audience window sends, so two open windows never send twice. It sends after `showSlide` settles, and does not send again when a remote sync message re-shows the same slide.
