@@ -26,7 +26,10 @@ foreach my $name ($ENV{MDP_CHROME} // (), qw(chromium chromium-browser google-ch
 plan skip_all => 'no Chromium found' unless $chrome;
 
 my $build = "$root/build/browser-test";
-make_path("$build/profile", "$build/tmp");
+# Chromium puts its singleton socket under TMPDIR, and a Unix socket path
+# must fit in 107 bytes, so the scratch folder sits as high as it can.
+my $scratch = "$root/build/tmp";
+make_path("$build/profile", $scratch);
 my $deck = "$build/deck.html";
 {
     local $ENV{MDP_DIATHEKE} = "$root/t/bin/fake-diatheke";
@@ -35,7 +38,7 @@ my $deck = "$build/deck.html";
 }
 
 my $harness = "file://$root/t/browser/harness.html?deck=" . "file://$deck";
-local $ENV{TMPDIR} = "$build/tmp";
+local $ENV{TMPDIR} = $scratch;
 my @cmd = ($chrome, '--headless', '--no-sandbox', '--disable-gpu',
     '--allow-file-access-from-files', "--user-data-dir=$build/profile",
     '--virtual-time-budget=60000', '--dump-dom', $harness);
