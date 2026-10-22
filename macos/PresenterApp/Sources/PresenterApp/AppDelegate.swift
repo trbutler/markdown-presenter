@@ -6,6 +6,7 @@ import PresenterCore
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let controller = DeckController()
+    private var midiTerminationPending = false
     private var windowManager: WindowManager?
     private var keyRouter: KeyRouter?
     private var preferencesWindow: NSWindow?
@@ -21,7 +22,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
-    func applicationWillTerminate(_ notification: Notification) { windowManager?.shutdown() }
+    // VERIFY-ON-MAC: confirm AppKit terminateLater/reply integration on macOS 27.
+    // Shutdown waits asynchronously for MIDI queue completion or a 500 ms deadline.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !midiTerminationPending else { return .terminateLater }
+        midiTerminationPending = true
+        controller.stopMIDI { [weak self] in
+            Task { @MainActor in self?.finishMIDITermination() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(500)) { [weak self] in
+            self?.finishMIDITermination()
+        }
+        return .terminateLater
+    }
+
+    private func finishMIDITermination() {
+        guard midiTerminationPending else { return }
+        midiTerminationPending = false
+        NSApp.reply(toApplicationShouldTerminate: true)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        controller.stopMIDI()
+        windowManager?.shutdown()
+    }
 
     private func resolveDeckURL() -> URL? {
         if let path = CommandLine.arguments.dropFirst().first(where: { !$0.hasPrefix("-") }) {

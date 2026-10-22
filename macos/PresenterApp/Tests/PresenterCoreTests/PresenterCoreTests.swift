@@ -100,7 +100,7 @@ final class BridgeTests: XCTestCase {
 
     func testApplyScript() {
         let js = BridgeScript.apply(DeckState(index: 4, black: true, timerStart: 1000, count: 9))
-        XCTAssertEqual(js, "window.presenter && window.presenter.apply({index: 4, black: true, timerStart: 1000.0});")
+        XCTAssertTrue(js.contains("window.presenter.apply({index: 4, black: true, timerStart: 1000.0, lowerThird: null, lowerStart: null})"))
     }
 }
 

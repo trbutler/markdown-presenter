@@ -14,17 +14,16 @@ final class DeckController {
 
     private(set) var state = DeckState()
     let seed = UInt32.random(in: 0...UInt32.max)
-    private var viewList = ViewList()
     private var metadataViewID: UUID?
     private var registrations: [UUID: Registration] = [:]
     private var pendingApplies: [UUID: String] = [:]
-    private var reportedMIDIUnavailable = false
-    /// Integration point for the separate strict MIDIRequest/CoreMIDI branch.
-    /// Only the authoritative audience instance reaches this callback.
-    var audienceMIDIHandler: (([String: Any]) -> Void)?
+    private var bridgeGate = ViewBridgeGate()
+    private let midi = MIDIOutput()
+
+    func stopMIDI(completion: @escaping @Sendable () -> Void = {}) { midi.stop(completion: completion) }
 
     func configure(_ list: ViewList, deckURL: URL) {
-        viewList = list
+        bridgeGate.configure(list)
         metadataViewID = list.primaryMainID ?? list.views.first(where: {
             guard let url = try? $0.resolvedURL(deckURL: deckURL) else { return false }
             return ViewURLPolicy.allowsBridge(url, deckURL: deckURL)
@@ -33,12 +32,15 @@ final class DeckController {
 
     func register(_ webView: WKWebView, instanceID: UUID, viewID: UUID, isCanonical: Bool,
                   audienceRendering: Bool, onApplied: @escaping @MainActor () -> Void) {
+        bridgeGate.register(instanceID: instanceID, viewID: viewID, isCanonical: isCanonical,
+                            audienceRendering: audienceRendering)
         registrations[instanceID] = Registration(webView: webView, viewID: viewID, isCanonical: isCanonical,
                                                 audienceRendering: audienceRendering, onApplied: onApplied)
     }
 
     func beginRestoration(_ instanceID: UUID) { pendingApplies[instanceID] = nil }
     func unregister(_ instanceID: UUID) {
+        bridgeGate.unregister(instanceID)
         registrations[instanceID] = nil
         pendingApplies[instanceID] = nil
     }
@@ -50,7 +52,8 @@ final class DeckController {
 
     func perform(_ command: DeckCommand) { perform([command]) }
     func perform(_ commands: [DeckCommand]) {
-        let next = commands.reduce(state) { $0.applying($1) }
+        let now = DeckState.nowMillis()
+        let next = commands.reduce(state) { $0.applying($1, at: now) }
         guard next != state else { return }
         state = next
         for id in registrations.keys { push(to: id) }
@@ -66,21 +69,12 @@ final class DeckController {
         case .ready:
             if registration.isCanonical && registration.viewID == metadataViewID { perform(message.commands) }
             push(to: instanceID)
+        case .midi(let request):
+            guard bridgeGate.permitsMIDI(from: instanceID) else { return }
+            midi.send(request)
         case .request:
-            guard registration.isCanonical else { return }
-            if registration.audienceRendering && !viewList.permitsAudienceEffects(viewID: registration.viewID, isCanonical: true) { return }
+            guard bridgeGate.permitsRequest(from: instanceID) else { return }
             perform(message.commands)
-        }
-    }
-
-    func handleMIDI(_ body: [String: Any], from instanceID: UUID, webView: WKWebView) {
-        guard let registration = registrations[instanceID], registration.webView === webView,
-              viewList.permitsAudienceEffects(viewID: registration.viewID, isCanonical: registration.isCanonical) else { return }
-        if let handler = audienceMIDIHandler {
-            handler(body)
-        } else if !reportedMIDIUnavailable {
-            reportedMIDIUnavailable = true
-            NSLog("[MIDI] Native sender is on the separate Swift MIDI review branch; message dropped")
         }
     }
 

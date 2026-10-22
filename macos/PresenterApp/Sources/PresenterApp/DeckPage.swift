@@ -123,9 +123,7 @@ private final class ScriptMessageRelay: NSObject, WKScriptMessageHandler {
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.frameInfo.isMainFrame, let webView = webView, message.webView === webView else { return }
-        if let body = message.body as? [String: Any], body["type"] as? String == "midi" {
-            controller?.handleMIDI(body, from: instanceID, webView: webView)
-        } else if let parsed = BridgeMessage(body: message.body) {
+        if let parsed = BridgeMessage(body: message.body) {
             controller?.handle(parsed, from: instanceID, webView: webView)
         }
     }
