@@ -66,6 +66,10 @@ final class BridgeTests: XCTestCase {
         XCTAssertNil(BridgeMessage(body: ["type": "launch-missiles"] as [String: Any]))
     }
 
+    func testInjectSeedScript() {
+        XCTAssertEqual(BridgeScript.injectSeed(49), "window.__presenterSeed = 49;")
+    }
+
     func testApplyScript() {
         let js = BridgeScript.apply(DeckState(index: 4, black: true, timerStart: 1000, count: 9))
         XCTAssertEqual(js, "window.presenter && window.presenter.apply({index: 4, black: true, timerStart: 1000.0});")

@@ -4,6 +4,9 @@ import Foundation
 /// `window.webkit.messageHandlers.presenter.postMessage(...)`.
 public enum BridgeMessage: Equatable, Sendable {
     /// A view finished loading (also sent after a reload or a web-process crash).
+    /// `count` and `titles` follow the play order, fillers included. `view` is
+    /// the name the page was opened with (an alias such as `confidence` stays
+    /// as sent; the template's own `notes`/`lyrics`/`service` parse as nil).
     case ready(view: ViewRole?, count: Int, titles: [String])
     /// A view asked for a change (control-view click, on-screen button).
     /// Swift applies it and pushes the resulting state to every view.
@@ -75,6 +78,13 @@ public enum BridgeScript {
     /// file URL loses its query string.
     public static func injectView(_ role: ViewRole) -> String {
         "window.__presenterView = '\(role.rawValue)';"
+    }
+
+    /// Injected at document start with one seed per controller, so every view
+    /// builds the same play order (filler placement) when the deck has no
+    /// `// seed`. `presenter.apply`'s index counts that play order.
+    public static func injectSeed(_ seed: UInt32) -> String {
+        "window.__presenterSeed = \(seed);"
     }
 
     /// Render `state` in a page. The template's `presenter.apply` never echoes

@@ -15,6 +15,7 @@ final class DeckPage: NSObject, WKNavigationDelegate {
 
         let content = WKUserContentController()
         content.addUserScript(WKUserScript(source: BridgeScript.injectView(role), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        content.addUserScript(WKUserScript(source: BridgeScript.injectSeed(controller.seed), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let config = WKWebViewConfiguration()
         config.userContentController = content
         // Video slides and soundtrack beds must start without a click.

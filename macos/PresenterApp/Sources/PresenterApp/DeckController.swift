@@ -6,6 +6,8 @@ import PresenterCore
 @MainActor
 final class DeckController {
     private(set) var state = DeckState()
+    /// Shared by every view so they agree on the filler order (see `BridgeScript.injectSeed`).
+    let seed = UInt32.random(in: 0...UInt32.max)
     private(set) var titles: [String] = []
     private var webViews: [ViewRole: WKWebView] = [:]
 
