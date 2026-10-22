@@ -36,6 +36,7 @@ public protocol FrameSink: AnyObject {
     var preferredFormat: PixelFormat { get }
     func start(sourceName: String, width: Int, height: Int, framesPerSecond: Double) throws
     func send(_ frame: VideoFrame)
+    /// Must be safe after a partially failed start and when already stopped.
     func stop()
 }
 
