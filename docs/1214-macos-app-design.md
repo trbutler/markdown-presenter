@@ -91,21 +91,38 @@ they do in PowerPoint and Proclaim, whichever window has focus.
   that starts playing in the other views. Autoplay without a click is enabled,
   because Tim's 1213 work has video slides and soundtrack beds.
 
-### Template changes (this branch)
+### Template changes (combined with 1213)
 
-* `generate.pl` reads a `Notes:` (or `Note:`) line. Everything after it in
-  that slide is HTML-escaped and emitted as `<aside class="notes">`. The
-  audience view hides it.
-* `template.html` adds the four views as CSS on a `view-<role>` class on
-  `<html>`. It also adds black-screen support (B), the clock and timer, and the
-  sync bridge above. The audience view renders pixel-identically to the old
-  template (verified, section 6).
-* Porting to Tim's 1213 template: his working tree has a much larger
-  template, with sections, hash routing, lower thirds and audio. The view
-  layer is additive (CSS block, `applyState`/`requestState`, the two `setup*`
-  functions), so it should port by hand. It has not been tried, because his
-  edits are uncommitted. In the overlay view his `.lower-third` element is the
-  natural thing to keep visible. Hash writes (`#N`) are harmless in-app.
+The 1214 branch built its view layer on the old committed template. On
+`review/hubsup-1213-1214-combined` it is ported onto the 1213 template
+instead, and the two vocabularies are one:
+
+* Notes: the 1213 generator already reads `Note:`, `Notes:` (text may follow
+  on the same line) and `<!-- notes -->` ... `<!-- /notes -->`, HTML-escaped
+  into `<aside class="notes">`. The 1214 generator change was not needed.
+* Views: the app's role names are aliases. `confidence` opens the 1213
+  `notes` view, which now also shows a still copy of the next slide (End
+  after the last) and the elapsed timer. `control` opens the 1213 `service`
+  view, which now has a transport bar (Prev, Next, Black, Reset timer, slide
+  number, timer, clock). `overlay` keeps its 1213 meaning: lower thirds and
+  the countdown only, transparent. Words over camera are the 1213 `lyrics`
+  view. The 1214 `.cm-*`/`.ctl-*` layouts and its centred-text overlay were
+  not carried over.
+* Sync: one path, `requestState()`. In a browser it applies the change and
+  relays it over the 1213 BroadcastChannel (which now also carries
+  `timerStart`). In the app it posts `{type:'request', ...}` and waits for
+  Swift's `presenter.apply`. The bridge contract above is unchanged, except
+  that `index`, `count` and `titles` follow the play order, fillers
+  included. So that every web view builds the same play order, Swift injects
+  one `window.__presenterSeed` (used only when the deck has no `// seed`).
+  Only the audience view runs timers, cycles, countdownEnd and video ends
+  in-app.
+* Keys: in a browser, the 1213 set (which includes every 1214 key). In the
+  app the page ignores the keys `KeyMap` routes and still handles the rest:
+  number+Enter, Enter, N, P, Backspace, S, Esc, F.
+* The audience view is unchanged: for `pray-walk.md` the slide markup and
+  deck config are identical to the 1213 build, and all 102 play-order
+  screenshots are byte-identical (bug, video and canvas masked).
 
 ## 3. NDI output
 
@@ -314,17 +331,20 @@ PLAYWRIGHT=/path/to/node_modules/playwright node macos/tools/check-views.js \
 
 ## 8. Decisions for Tim
 
-1. Are F5/Esc, W (white) and number+Enter wanted? PowerPoint has them;
-   Proclaim differs.
-2. Overlay look: the current choice is centred lower-third text over a soft
-   dark gradient band. Options are no band, a solid bar, or his `.lower-third`
-   design.
+1. Are F5/Esc and W (white) wanted? PowerPoint has them; Proclaim differs.
+   (Number+Enter came with 1213 and works in the app through the page.)
+2. NDI output: the app sends `?view=overlay`, which with 1213 means lower
+   thirds and the countdown only. Should NDI carry `lyrics` (words) instead,
+   or as a second source?
 3. Shipping: user-installed NDI runtime only (current design), or bundle
    libndi in a signed app (needs a EULA)?
 4. Does markdown-presenter get an open-source licence? This affects whether
    the MIT NDI headers go in-repo.
-5. Notes syntax: `Notes:` to the end of the slide (chosen), or Marp-style
-   `<!-- -->` comments?
+5. Notes syntax: settled by the 1213 merge; `Note:`, `Notes:` and
+   `<!-- notes -->` all work.
+6. In-app, Next on the last slide does not wrap for a `// loop` deck, and a
+   slide click in the control view does not lift black (1213 behaviour; the
+   1214 grid did). Wanted?
 
 ## Sources
 

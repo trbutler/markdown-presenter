@@ -81,7 +81,7 @@ These are for running a Sunday service from the deck. `examples/sunday-service.m
 
 `!scripture John 3:16-18 (KJV)` on its own line becomes one or more slides of verse text, split between verses at about 330 characters, each with the range and translation as its kicker. Put it in a block of its own. The translation in parentheses is a SWORD module name; `// translation: WEB` changes the default for the lines after it (KJV otherwise). The verses come from `diatheke`, the SWORD command-line tool. If it is not installed, or the module is missing, the build stops and says so; it never writes an empty slide. `MDP_DIATHEKE=/path/to/diatheke` points at a copy that is not on the PATH.
 
-Speaker notes start at a line that begins with `Note:` (or `Notes:`), or at `<!-- notes -->`, and run to the end of the slide, or to `<!-- /notes -->`. They are only shown in the notes view.
+Speaker notes start at a line that begins with `Note:` or `Notes:` (text may follow on the same line), or at `<!-- notes -->`, and run to the end of the slide, or to `<!-- /notes -->`. They are HTML-escaped and only shown in the notes view.
 
 Pre-service and post-service loops are sections:
 
@@ -100,12 +100,16 @@ Pre-service and post-service loops are sections:
 `?view=` on the page address picks a view. It puts `view-<name>` on `<html>` and `<body>`.
 
 - `audience` (default): the slides.
-- `notes`: the slide small, its notes beside it, the clock, the slide number, the countdown and the next slide's heading.
+- `notes` (alias `confidence`): the slide small, its notes beside it, a still copy of the next slide (End after the last), the clock, the elapsed timer, the slide number, the countdown and the next slide's heading.
 - `lyrics`: only the words, on a transparent page, for an OBS browser source.
 - `overlay`: only lower thirds and the countdown, on a transparent page.
-- `service`: the service order, every section and slide heading. Click one to go there.
+- `service` (alias `control`): the service order, every section and slide heading. Click one to go there. Along the bottom: Prev, Next, Black, Reset timer, the slide number, the timer and the clock.
 
-Only the audience view makes sound. Windows of the same deck follow each other in one browser (BroadcastChannel), so the projector can show the plain page while the laptop shows `?view=notes` or `?view=service`, and either one drives. A window opened late joins on the current slide.
+`confidence` and `control` are the macOS app's names (`docs/1214-macos-app-design.md`); they open the same views. An unknown name opens the audience view.
+
+Only the audience view makes sound. Windows of the same deck follow each other in one browser (BroadcastChannel), so the projector can show the plain page while the laptop shows `?view=notes` or `?view=service`, and either one drives. A window opened late joins on the current slide and the running timer.
+
+Inside the macOS app the windows do not talk to each other: Swift owns the state and pushes it to each with `presenter.apply({index, black, timerStart})`, and a page asks for changes with `{type: 'request', index, black, timerStart}` (`macos/PresenterApp/Sources/PresenterCore/Bridge.swift`). `index` counts the play order, fillers included. Only the audience window runs timers, cycles and countdowns there.
 
 ### Keys
 
@@ -118,9 +122,18 @@ The keys are PowerPoint's and Proclaim's, so presentation clickers work.
 - S: the service order over the slides; Esc closes it.
 - F: fullscreen.
 
+In the macOS app the clicker keys (arrows, Page Up/Down, Space, Home, End, B, `.`) are taken by the app before the page sees them; the others above still work through the page.
+
 ### Tests
 
 `prove -l t/` runs the generator tests. `t/05-browser.t` drives a built deck in headless Chromium and is skipped when Chromium is not installed. Tests never call a real `diatheke`; `t/bin/fake-diatheke` stands in.
+
+`macos/tools/check-views.js` checks the app views, keys, sync, overlay alpha and a faked native bridge with Playwright, and compares the audience view pixel for pixel with a baseline build:
+
+```
+perl generate.pl macos/fixtures/1214-demo.md build/cv/deck.html
+PLAYWRIGHT=/path/to/node_modules/playwright node macos/tools/check-views.js build/cv/deck.html build/cv/baseline.html chromium
+```
 
 ## Usage
 
