@@ -77,4 +77,12 @@ like($stderr, qr/Bad countdownEnd: later/, 'bad countdownEnd');
 is($rc, 0, 'sample.md builds');
 is($stderr, '', 'sample.md has no warnings');
 
+# The macOS app fixture (hub 1214) uses "Notes:" on its own line and
+# "Note:" with the text on the same line.
+($rc, $html, $stderr) = generate("$root/macos/fixtures/1214-demo.md");
+is($rc, 0, '1214 demo builds') or diag $stderr;
+like($html, qr/<p>Welcome everyone\. Mention the prayer walk sign-up sheet\.<\/p>\n      <p>Second paragraph of notes, with &lt;angle brackets&gt; &amp; ampersands\.<\/p>/, 'Notes: block, two paragraphs, escaped');
+like($html, qr/<aside class="notes" aria-hidden="true">\n      <p>Close in prayer\.<\/p>/, 'Note: text on the same line');
+unlike($html, qr/<li>[^<]*Close in prayer/, 'notes never become bullets');
+
 done_testing();

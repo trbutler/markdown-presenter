@@ -164,6 +164,28 @@
     w = await frame('?now=08:00&view=bogus');
     check('unknown view -> audience', w.document.body.classList.contains('view-audience'));
 
+    // The macOS app's names (hub 1214) open the same views.
+    w = await frame('?now=08:00&view=confidence', '#3');
+    await sleep(200);
+    check('confidence is the notes view', w.document.body.classList.contains('view-notes') && css(w, w.document.getElementById('notesPanel'), 'display') === 'block');
+    const nk = w.document.querySelector('#nextPreview .slide.active .kicker');
+    check('notes view shows the next slide', nk && nk.textContent === 'John 3:16-17 (KJV)', nk && nk.textContent);
+    check('next slide copy is not a deck slide', w.document.querySelectorAll('body > .slide').length === 8);
+    check('notes view timer', /^\d\d:\d\d$/.test(w.document.querySelector('#statusBar .timer').textContent), w.document.querySelector('#statusBar .timer').textContent);
+    key(w, 'End');
+    check('End card after the last slide', css(w, w.document.getElementById('nextEnd'), 'display') === 'flex');
+    w = await frame('?now=08:00&view=control', '#2');
+    await sleep(200);
+    const tp = w.document.getElementById('transport');
+    check('control is the service view', w.document.body.classList.contains('view-service') && css(w, tp, 'display') === 'flex');
+    tp.querySelector('[data-act=next]').click();
+    check('transport Next', at(w) === '#3', at(w));
+    tp.querySelector('[data-act=black]').click();
+    check('transport Black', w.document.body.classList.contains('blacked') && w.document.documentElement.classList.contains('blacked'));
+    tp.querySelector('[data-act=black]').click();
+    w = await frame('?now=08:00&view=audience', '#1');
+    check('no transport in audience view', css(w, w.document.getElementById('transport'), 'display') === 'none' && css(w, w.document.getElementById('nextPreview'), 'display') === 'none');
+
     // Two windows of the same deck follow each other.
     const a = await frame('?now=08:00', '#1');
     const b = await frame('?view=notes&now=08:00', '', true);

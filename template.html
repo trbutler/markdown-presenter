@@ -513,6 +513,86 @@
   .service-panel .num { width: 2.5em; color: #888; font-variant-numeric: tabular-nums; }
   .service-panel .sub { color: #999; margin-left: auto; font-size: 0.85em; }
   .service-panel .filler .label { font-style: italic; }
+
+  /* Notes view (also ?view=confidence, hub 1214): the next slide small
+     beside the status, and the elapsed timer. */
+  .next-preview, .transport { display: none; }
+  body.view-notes .status-bar { width: 31vw; }
+  body.view-notes .next-preview {
+    display: block;
+    position: fixed;
+    top: 62vh;
+    left: 35vw;
+    width: 25vw;
+    height: 25vh;
+    overflow: hidden;
+    background: #000;
+    outline: 2px solid #333;
+  }
+  body.view-notes .next-preview .slide {
+    width: 100vw;
+    height: 100vh;
+    transform: scale(0.25);
+    transform-origin: 0 0;
+    outline: none;
+  }
+  .next-preview .next-label {
+    position: absolute;
+    top: 0.5vh; left: 0.6vw;
+    z-index: 30;
+    font: 1.8vh -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #ccc;
+    text-shadow: 0 0 4px #000;
+  }
+  .next-preview .next-end {
+    display: none;
+    position: absolute;
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+    font: 4vh -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #666;
+  }
+  .status-bar .timer { font-size: 1.6em; font-variant-numeric: tabular-nums; color: #a8d5a2; }
+
+  /* Service view (also ?view=control, hub 1214): transport buttons, the
+     slide number, the timer and the clock along the bottom. */
+  body.view-service .controls { display: none; }
+  body.view-service .transport {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 210;
+    padding: 10px 4vw;
+    background: #1b1b1b;
+    border-top: 1px solid #333;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 18px;
+    color: #ddd;
+    font-variant-numeric: tabular-nums;
+  }
+  .transport button {
+    background: #333;
+    color: #fff;
+    border: 1px solid #555;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 16px;
+    cursor: pointer;
+  }
+  body.blacked .transport [data-act="black"] { background: #b00020; border-color: #b00020; }
+  .transport .spacer { flex: 1; }
+  .transport .timer { font-size: 1.5em; color: #a8d5a2; }
+  .transport .clock { font-size: 1.5em; color: #fff; }
+
+  /* Inside the macOS app the windows have no on-page buttons, and the
+     projector shows no pointer. */
+  .in-app .controls { display: none; }
+  .in-app.view-audience, .in-app.view-audience * { cursor: none; }
 </style>
 </head>
 <body>
@@ -525,6 +605,17 @@
   <aside class="notes-panel" id="notesPanel"><div class="notes-title" id="notesTitle"></div><div id="notesBody"></div></aside>
   <div class="status-bar" id="statusBar"></div>
   <nav class="service-panel" id="servicePanel" aria-label="Service order"></nav>
+  <div class="next-preview" id="nextPreview"><div class="next-label">Next</div><div class="next-end" id="nextEnd">End</div></div>
+  <div class="transport" id="transport">
+    <button type="button" data-act="prev">← Prev</button>
+    <button type="button" data-act="next">Next →</button>
+    <button type="button" data-act="black">Black (B)</button>
+    <button type="button" data-act="timer">Reset timer</button>
+    <span class="pos"></span>
+    <span class="spacer"></span>
+    <span class="timer" data-timer></span>
+    <span class="clock" data-clock></span>
+  </div>
 
   <div class="controls">
     <button onclick="prevSlide()">← Prev</button>
@@ -535,7 +626,14 @@
 <script>
   const deck = /* DECK_CONFIG */;
   const params = new URLSearchParams(location.search);
+  // In the macOS app (hub 1214) each view is a WKWebView. Swift owns the
+  // show state and pushes it to every view through presenter.apply(); the
+  // page asks for changes instead of making them.
+  const nativeBridge = (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.presenter) || null;
+  if (nativeBridge) document.documentElement.classList.add('in-app');
   if (params.has('seed')) deck.seed = Number(params.get('seed'));
+  // The app gives all its views one seed, so they agree on the filler order.
+  else if (deck.seed == null && typeof window.__presenterSeed === 'number') deck.seed = window.__presenterSeed;
   if (/^(0|off|false|no)$/i.test(params.get('chrome') || '')) {
     document.body.classList.add('no-chrome');
   }
@@ -553,8 +651,13 @@
   let heldForVideo = false;
 
   // ---- Views (hub 1213) ----------------------------------------------
+  // confidence and control are the macOS app's names (hub 1214) for the
+  // notes and service views. The app sets window.__presenterView in case a
+  // file URL loses its query.
   const views = ['audience', 'notes', 'lyrics', 'overlay', 'service'];
-  let view = (params.get('view') || 'audience').toLowerCase();
+  const viewAliases = { confidence: 'notes', control: 'service' };
+  const askedView = String(window.__presenterView || params.get('view') || 'audience').toLowerCase();
+  let view = viewAliases[askedView] || askedView;
   if (!views.includes(view)) view = 'audience';
   document.documentElement.classList.add('view-' + view);
   document.body.classList.add('view-' + view);
@@ -572,27 +675,42 @@
   const notesBody = document.getElementById('notesBody');
   const statusBar = document.getElementById('statusBar');
   const servicePanel = document.getElementById('servicePanel');
+  const nextPreview = document.getElementById('nextPreview');
+  const nextEnd = document.getElementById('nextEnd');
+  const transport = document.getElementById('transport');
   let blacked = false;
+  let timerStart = Date.now();
+  // Timers, countdowns and video ends move the show on. In the app only the
+  // audience view runs them, so four windows never advance four times.
+  const leads = !nativeBridge || view === 'audience';
+
+  // The deck's own slides; the notes view's next-slide copy is not one.
+  function deckSlides() {
+    return document.querySelectorAll('body > .slide');
+  }
 
   // Windows of the same deck follow each other: open ?view=notes on the
   // laptop and the plain deck on the projector, and either one drives.
   const peerId = Math.random().toString(36).slice(2);
+  // Inside the app Swift relays instead, so the channel stays closed there.
   let channel = null;
-  try { channel = new BroadcastChannel('mdp:' + location.pathname); } catch (err) { channel = null; }
+  if (!nativeBridge) {
+    try { channel = new BroadcastChannel('mdp:' + location.pathname); } catch (err) { channel = null; }
+  }
   function post(msg) {
     if (!channel) return;
     msg.from = peerId;
     try { channel.postMessage(msg); } catch (err) {}
   }
   function nodeIndex(slide) {
-    return [...document.querySelectorAll('.slide')].indexOf(slide);
+    return [...deckSlides()].indexOf(slide);
   }
   if (channel) {
     channel.onmessage = (event) => {
       const msg = event.data || {};
       if (msg.from === peerId) return;
       if (msg.type === 'show') {
-        const node = document.querySelectorAll('.slide')[msg.node];
+        const node = deckSlides()[msg.node];
         let n = msg.n;
         if (!playOrder[n] || playOrder[n].slide !== node) {
           const k = playOrder.findIndex(item => item.slide === node);
@@ -600,19 +718,57 @@
         }
         if (playOrder[n] && n !== current) showSlide(n, true);
         if (typeof msg.black === 'boolean' && msg.black !== blacked) setBlack(msg.black, true);
+        if (typeof msg.timerStart === 'number') timerStart = msg.timerStart;
       } else if (msg.type === 'black') {
         setBlack(!!msg.on, true);
+      } else if (msg.type === 'timer') {
+        if (typeof msg.start === 'number') timerStart = msg.start;
       } else if (msg.type === 'hello') {
-        post({ type: 'show', n: current, node: nodeIndex(playOrder[current] && playOrder[current].slide), black: blacked });
+        post({ type: 'show', n: current, node: nodeIndex(playOrder[current] && playOrder[current].slide), black: blacked, timerStart: timerStart });
       }
     };
   }
 
   function setBlack(on, fromRemote) {
     blacked = !!on;
+    document.documentElement.classList.toggle('blacked', blacked);
     document.body.classList.toggle('blacked', blacked);
     if (!fromRemote) post({ type: 'black', on: blacked });
     updateStatus();
+    updateTransport();
+  }
+
+  function setTimerStart(start, fromRemote) {
+    timerStart = start;
+    if (!fromRemote) post({ type: 'timer', start: start });
+    tick();
+  }
+
+  // Every change the operator asks for comes through here. A browser page
+  // makes it and tells its peers; in the app it goes to Swift, which pushes
+  // the new state to every view (applyState below).
+  function requestState(patch) {
+    if (nativeBridge) {
+      nativeBridge.postMessage(Object.assign({ type: 'request' }, patch));
+      return;
+    }
+    if (typeof patch.index === 'number' && playOrder[patch.index]) showSlide(patch.index);
+    if (typeof patch.black === 'boolean' && patch.black !== blacked) setBlack(patch.black);
+    if (typeof patch.timerStart === 'number') setTimerStart(patch.timerStart);
+  }
+
+  // Draws a state pushed by the app. It never posts back, so pushing the
+  // same state to every view cannot loop.
+  function applyState(s) {
+    if (!s) return;
+    if (Number.isInteger(s.index) && playOrder[s.index] && s.index !== current) showSlide(s.index, true);
+    if (typeof s.black === 'boolean' && s.black !== blacked) setBlack(s.black, true);
+    if (typeof s.timerStart === 'number') timerStart = s.timerStart;
+    tick();
+  }
+
+  function goTo(n) {
+    requestState({ index: n });
   }
 
   function sectionSpec(n) {
@@ -633,10 +789,11 @@
   // Timer-driven advance. A // cycle: section wraps to its own first slide;
   // the operator's Next on its last slide leaves it.
   function autoNext() {
+    if (!leads) return;
     const spec = sectionSpec(current);
     if (spec && spec.cycle) {
       const [a, b] = sectionBounds(current);
-      showSlide(current < b ? current + 1 : a);
+      goTo(current < b ? current + 1 : a);
       return;
     }
     nextSlide();
@@ -697,10 +854,10 @@
     const left = countdownTarget(spec.countdown) - clockNow();
     if (left > 0) countdownArmed.add(sectionIndex);
     if (left <= 0) {
-      if (spec.countdownEnd === 'next' && countdownArmed.has(sectionIndex) && countdownFiredFor !== sectionIndex) {
+      if (spec.countdownEnd === 'next' && leads && countdownArmed.has(sectionIndex) && countdownFiredFor !== sectionIndex) {
         countdownFiredFor = sectionIndex;
         const [, b] = sectionBounds(current);
-        if (b < playOrder.length - 1) setTimeout(() => showSlide(b + 1), 0);
+        if (b < playOrder.length - 1) setTimeout(() => goTo(b + 1), 0);
       }
       return 'Starting now';
     }
@@ -711,6 +868,17 @@
     document.body.classList.toggle('has-countdown', !!text);
     if (countdownEl.textContent !== text) countdownEl.textContent = text;
     updateStatus();
+    updateTransport();
+  }
+
+  // Time since the show (or the operator's Reset timer) started.
+  function elapsedText() {
+    const secs = Math.max(0, Math.floor((Date.now() - timerStart) / 1000));
+    const pad = (x) => String(x).padStart(2, '0');
+    return (secs >= 3600 ? Math.floor(secs / 3600) + ':' : '') + pad(Math.floor(secs / 60) % 60) + ':' + pad(secs % 60);
+  }
+  function clockText() {
+    return clockNow().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
   }
 
   // ---- Notes, status and service order ----------------------------------
@@ -720,8 +888,23 @@
     if (!slide) return;
     notesTitle.textContent = slideLabel(slide).label;
     const aside = slide.querySelector('.notes');
-    if (aside) notesBody.innerHTML = aside.innerHTML;
+    if (aside) notesBody.innerHTML = aside.innerHTML.trim();
     else notesBody.innerHTML = '<p class="empty">No notes for this slide.</p>';
+    updateNextPreview();
+  }
+
+  // A still copy of the next slide: no video, no sound, no notes.
+  function updateNextPreview() {
+    nextPreview.querySelectorAll('.slide').forEach(el => el.remove());
+    const next = playOrder[current + 1];
+    nextEnd.style.display = next ? 'none' : 'flex';
+    if (!next) return;
+    const copy = next.slide.cloneNode(true);
+    copy.querySelectorAll('video, canvas, .notes').forEach(el => el.remove());
+    copy.classList.add('active');
+    copy.setAttribute('aria-hidden', 'true');
+    nextPreview.insertBefore(copy, nextPreview.firstChild);
+    fitContent(copy);
   }
 
   function updateStatus() {
@@ -729,7 +912,8 @@
     const spec = sectionSpec(current) || {};
     const next = playOrder[current + 1];
     const parts = [
-      ['clock', clockNow().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })],
+      ['clock', clockText()],
+      ['timer', elapsedText()],
       ['pos', 'Slide ' + (current + 1) + ' / ' + playOrder.length],
       ['section', spec.name || ''],
       ['countdown-copy', countdownText()],
@@ -739,10 +923,22 @@
     const html = parts.filter(p => p[1]).map(p => {
       const span = document.createElement('span');
       span.className = p[0];
+      if (p[0] === 'clock' || p[0] === 'timer') span.setAttribute('data-' + p[0], '');
       span.textContent = p[1];
       return span.outerHTML;
     }).join('');
     if (statusBar.innerHTML !== html) statusBar.innerHTML = html;
+  }
+
+  function updateTransport() {
+    if (view !== 'service' || !playOrder.length) return;
+    const set = (sel, text) => {
+      const el = transport.querySelector(sel);
+      if (el.textContent !== text) el.textContent = text;
+    };
+    set('.pos', 'Slide ' + (current + 1) + ' / ' + playOrder.length + (blacked ? ' (black)' : ''));
+    set('.timer', elapsedText());
+    set('.clock', clockText());
   }
 
   function buildServicePanel() {
@@ -779,7 +975,7 @@
         button.appendChild(sub);
       }
       button.addEventListener('click', () => {
-        showSlide(i);
+        goTo(i);
         if (view !== 'service') closeService();
       });
       li.appendChild(button);
@@ -845,7 +1041,7 @@
   }
 
   function buildPlayOrder() {
-    const nodes = [...document.querySelectorAll('.slide')];
+    const nodes = [...deckSlides()];
     const fillers = nodes.filter(s => s.dataset.deck === 'filler');
     const groups = (deck.sections || []).map(() => []);
     nodes.forEach(slide => {
@@ -1018,6 +1214,7 @@
 
   function armTimer(slide) {
     clearTimeout(advanceTimer);
+    if (!leads) return;
     const spec = sectionSpec(current);
     const cycle = spec && spec.cycle;
     if (!deck.autoAdvance && !cycle) return;
@@ -1032,7 +1229,7 @@
 
   function showSlide(n, fromRemote) {
     if (!playOrder.length) return;
-    document.querySelectorAll('.slide').forEach(s => {
+    deckSlides().forEach(s => {
       s.classList.remove('active');
       s.setAttribute('aria-hidden', 'true');
     });
@@ -1083,14 +1280,20 @@
   // From black, the first Next or Back only restores the picture, as in
   // PowerPoint, so a clicker never skips a slide the room has not seen.
   function nextSlide() {
-    if (blacked) { setBlack(false); return; }
-    if (current < playOrder.length - 1) showSlide(current + 1);
-    else if (deck.loop && playOrder.length) showSlide(0);
+    if (blacked) { requestState({ black: false }); return; }
+    if (current < playOrder.length - 1) goTo(current + 1);
+    else if (deck.loop && playOrder.length) goTo(0);
   }
   function prevSlide() {
-    if (blacked) { setBlack(false); return; }
-    if (current > 0) showSlide(current - 1);
-    else if (deck.loop && playOrder.length) showSlide(playOrder.length - 1);
+    if (blacked) { requestState({ black: false }); return; }
+    if (current > 0) goTo(current - 1);
+    else if (deck.loop && playOrder.length) goTo(playOrder.length - 1);
+  }
+  function toggleBlack() {
+    requestState({ black: !blacked });
+  }
+  function resetTimer() {
+    requestState({ timerStart: Date.now() });
   }
   function toggleFullscreen() {
     if (!document.fullscreenElement) {
@@ -1154,17 +1357,21 @@
 
   // Presentation clickers send PageDown/PageUp (some send B or . for blank),
   // the same keys PowerPoint and Proclaim answer to. A number then Enter
-  // jumps to that slide.
+  // jumps to that slide. In the app, Swift's KeyMap takes the clicker keys
+  // before the page sees them; the rest (numbers, Enter, N, P, S...) still
+  // land here and go to Swift as requests.
+  const nativeKeys = new Set(['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'ArrowLeft', 'ArrowUp', 'PageUp', 'Home', 'End', 'b', 'B', '.']);
   let typed = '';
   document.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const k = e.key;
+    if (nativeBridge && nativeKeys.has(k)) return;
     if (/^[0-9]$/.test(k)) { typed += k; return; }
     if (k === 'Enter' && typed) {
       const n = parseInt(typed, 10) - 1;
       typed = '';
       e.preventDefault();
-      if (n >= 0 && n < playOrder.length) showSlide(n);
+      if (n >= 0 && n < playOrder.length) goTo(n);
       return;
     }
     typed = '';
@@ -1176,13 +1383,13 @@
       prevSlide();
     } else if (k === 'Home') {
       e.preventDefault();
-      showSlide(0);
+      goTo(0);
     } else if (k === 'End') {
       e.preventDefault();
-      showSlide(playOrder.length - 1);
+      goTo(playOrder.length - 1);
     } else if (k === 'b' || k === 'B' || k === '.') {
       e.preventDefault();
-      setBlack(!blacked);
+      toggleBlack();
     } else if (k === 's' || k === 'S') {
       e.preventDefault();
       toggleService();
@@ -1213,16 +1420,40 @@
     if (player.src) player.play().catch(() => {});
   }
 
+  const transportActions = { prev: prevSlide, next: nextSlide, black: toggleBlack, timer: resetTimer };
+  transport.querySelectorAll('[data-act]').forEach(button => {
+    button.addEventListener('click', () => transportActions[button.dataset.act]());
+  });
+
   playOrder = buildPlayOrder();
   buildServicePanel();
+
+  // The surface the macOS app drives (Bridge.swift): it calls
+  // presenter.apply({index, black, timerStart}); index counts play order.
+  window.presenter = {
+    view: view,
+    count: playOrder.length,
+    apply: applyState,
+    state: () => ({ index: current, black: blacked, timerStart: timerStart }),
+    titles: () => playOrder.map(item => slideLabel(item.slide).label),
+  };
+
   // The first slide is local: a window that opens late must not pull the
   // others back. It asks them where they are instead.
   showSlide(indexFromHash(), true);
   post({ type: 'hello' });
+  if (nativeBridge) {
+    nativeBridge.postMessage({
+      type: 'ready',
+      view: viewAliases[askedView] ? askedView : view,
+      count: playOrder.length,
+      titles: window.presenter.titles(),
+    });
+  }
   setInterval(tick, 250);
   window.addEventListener('hashchange', () => {
     const n = indexFromHash();
-    if (n !== current) showSlide(n);
+    if (n !== current) goTo(n);
     else writeHash(n);
   });
   window.addEventListener('resize', () => {
