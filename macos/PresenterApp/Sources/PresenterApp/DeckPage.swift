@@ -100,6 +100,9 @@ final class ScriptMessageRelay: NSObject, WKScriptMessageHandler {
             NSLog("[Bridge] ignored message from %@: %@", role.rawValue, String(describing: message.body))
             return
         }
+        if case .midi = parsed, (role != .audience || !message.frameInfo.isMainFrame) {
+            return
+        }
         let role = self.role
         Task { @MainActor [weak controller] in
             controller?.handle(parsed, from: role)

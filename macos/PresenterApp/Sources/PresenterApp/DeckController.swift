@@ -12,6 +12,7 @@ final class DeckController {
     private var webViews: [ViewRole: WKWebView] = [:]
     private var appliedHandlers: [ViewRole: @MainActor () -> Void] = [:]
     private var pendingApplies: [ViewRole: String] = [:]
+    private let midiOutput = MIDIOutput()
 
     func register(_ webView: WKWebView, as role: ViewRole, onApplied: @escaping @MainActor () -> Void) {
         webViews[role] = webView
@@ -42,7 +43,17 @@ final class DeckController {
         broadcast()
     }
 
+    func stopMIDI() {
+        midiOutput.stop()
+    }
+
     func handle(_ message: BridgeMessage, from role: ViewRole) {
+        if case .midi = message {
+            if let request = message.midiRequest(from: role) {
+                midiOutput.send(request)
+            }
+            return
+        }
         if case .applied(let token) = message {
             guard pendingApplies[role] == token else {
                 return

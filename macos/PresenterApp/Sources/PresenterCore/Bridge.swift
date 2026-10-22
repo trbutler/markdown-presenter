@@ -13,6 +13,8 @@ public enum BridgeMessage: Equatable, Sendable {
     case request(index: Int?, black: Bool?, timerStart: Double?)
     /// An apply has reached the page; token identifies the native push being acknowledged.
     case applied(token: String)
+    /// Short MIDI messages emitted once per audience slide change.
+    case midi(MIDIRequest)
 
     /// `body` is `WKScriptMessage.body`: an NSDictionary of NSString/NSNumber/NSArray.
     public init?(body: Any) {
@@ -28,6 +30,11 @@ public enum BridgeMessage: Equatable, Sendable {
                 return nil
             }
             self = .applied(token: token)
+        case "midi":
+            guard let request = MIDIRequest(body: dict) else {
+                return nil
+            }
+            self = .midi(request)
         case "request":
             self = .request(index: BridgeMessage.int(dict["index"]), black: dict["black"] as? Bool, timerStart: BridgeMessage.double(dict["timerStart"]))
         default:
@@ -40,7 +47,7 @@ public enum BridgeMessage: Equatable, Sendable {
         switch self {
         case .ready(_, let count, _):
             return [.setCount(count)]
-        case .applied:
+        case .applied, .midi:
             return []
         case .request(let index, let black, let timerStart):
             var result: [DeckCommand] = []
@@ -55,6 +62,14 @@ public enum BridgeMessage: Equatable, Sendable {
             }
             return result
         }
+    }
+
+    /// Trust the native relay's role, never a view name supplied by JavaScript.
+    public func midiRequest(from role: ViewRole) -> MIDIRequest? {
+        guard role == .audience, case .midi(let request) = self else {
+            return nil
+        }
+        return request
     }
 
     private static func int(_ value: Any?) -> Int? {
