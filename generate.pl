@@ -32,6 +32,13 @@ for my $block (@blocks) {
     my $bg = '';
     my $title = '';
     my @bullets;
+    my $notesHtml = '';
+
+    # Speaker notes: everything after a "Notes:" line belongs to the presenter
+    # (confidence view only), so strip it before title/bullet extraction.
+    if ($block =~ s/^Notes?:[ \t]*(.*)\z//ms) {
+        $notesHtml = notesToHtml($1);
+    }
 
     # Extract bg: path or ![bg](path)
     if ($block =~ m{^(?:bg:\s*|\s*!\[bg\]\()(\S+?)\)?\s*$}m) {
@@ -69,7 +76,7 @@ for my $block (@blocks) {
       <h1>$title</h1>
       $bullets_html
     </div>
-  </div>
+$notesHtml  </div>
 HTML
 
     push @slides_html, $slide;
@@ -78,6 +85,17 @@ HTML
 my $slides_block = join "\n", @slides_html;
 
 $template =~ s/<!-- SLIDES_PLACEHOLDER -->/$slides_block/;
+
+sub notesToHtml {
+    my ($text) = @_;
+    $text =~ s/^\s+|\s+$//g;
+    return '' unless length $text;
+    $text =~ s/&/&amp;/g;
+    $text =~ s/</&lt;/g;
+    $text =~ s/>/&gt;/g;
+    my @paras = map { s/\n/<br>/gr } split /\n\s*\n/, $text;
+    return qq{    <aside class="notes">} . join('', map { "<p>$_</p>" } @paras) . "</aside>\n";
+}
 
 if ($output) {
     open my $out, '>:utf8', $output or die "Cannot write $output: $!";

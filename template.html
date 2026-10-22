@@ -149,10 +149,95 @@
     z-index: 50;
     transition: width 0.3s;
   }
+
+  /* ---- Views (hub 1214): ?view=audience (default) | confidence | control | overlay ----
+     The class goes on <html>. The audience view is the original look, untouched. */
+  .slide .notes { display: none; }
+  .blackout {
+    position: fixed; inset: 0; background: #000; z-index: 1000;
+    opacity: 0; pointer-events: none; transition: opacity 0.4s ease;
+  }
+  .blacked .blackout { opacity: 1; }
+  .in-app .controls { display: none; }
+  .in-app.view-audience, .in-app.view-audience * { cursor: none; }
+
+  /* Confidence monitor: current + next slide, notes, clock and timer */
+  .view-confidence .controls, .view-confidence .progress, .view-confidence .blackout,
+  .view-control .controls, .view-control .progress, .view-control .blackout { display: none; }
+  .view-confidence body, .view-control body { background: #111; }
+  .cm {
+    position: fixed; inset: 0; display: grid; gap: 12px; padding: 12px;
+    grid-template-columns: 3fr 2fr; grid-template-rows: auto 3fr 2fr;
+  }
+  .cm-bar, .ctl-bar {
+    grid-column: 1 / -1; display: flex; align-items: baseline; gap: 28px;
+    font-variant-numeric: tabular-nums; font-size: 22px; color: #ccc;
+  }
+  .cm-clock, .cm-timer { font-size: 44px; font-weight: 700; color: #fff; }
+  .cm-timer { color: #a8d5a2; }
+  .cm-spacer { flex: 1; }
+  .black-badge {
+    display: none; background: #c0392b; color: #fff; font-weight: 700;
+    padding: 2px 12px; border-radius: 4px; letter-spacing: 1px;
+  }
+  .blacked .black-badge { display: inline-block; }
+  .cm-stage { position: relative; overflow: hidden; background: #000; border-radius: 6px; }
+  .cm-next { opacity: 0.85; }
+  .cm-label {
+    position: absolute; top: 8px; left: 10px; z-index: 30; font-size: 16px;
+    text-transform: uppercase; letter-spacing: 2px; color: #ccc;
+  }
+  .cm-canvas { position: absolute; width: 1920px; height: 1080px; transform-origin: 0 0; overflow: hidden; }
+  .cm-end { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 72px; color: #666; }
+  .cm-notes {
+    grid-column: 1 / -1; overflow: auto; background: #000; border-radius: 6px;
+    padding: 16px 24px; font-size: 34px; line-height: 1.35;
+  }
+  .cm-notes p + p { margin-top: 0.6em; }
+  .cm-notes.empty { color: #555; }
+
+  /* Control view: slide grid to jump to, transport buttons, clock */
+  .view-control .slide { display: none; }
+  .ctl { position: fixed; inset: 0; display: flex; flex-direction: column; gap: 12px; padding: 12px; overflow: hidden; }
+  .ctl-bar button {
+    background: #333; color: #fff; border: 1px solid #555; border-radius: 6px;
+    padding: 8px 16px; font-size: 16px; cursor: pointer;
+  }
+  .blacked .ctl-black { background: #c0392b; border-color: #c0392b; }
+  .ctl-grid {
+    flex: 1; overflow: auto; display: grid; gap: 12px; align-content: start;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+  .ctl-card {
+    position: relative; aspect-ratio: 16 / 9; border: 3px solid transparent; border-radius: 6px;
+    background: #000 center / cover no-repeat; color: #fff; text-align: left; cursor: pointer;
+    padding: 0; overflow: hidden; font: inherit;
+  }
+  .ctl-card span {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 8px; font-size: 14px;
+    background: linear-gradient(to top, rgba(0,0,0,0.85), transparent);
+  }
+  .ctl-card.current { border-color: #c0392b; }
+  .ctl-card.next { border-color: #a8d5a2; }
+
+  /* Overlay (NDI key/fill): transparent background, foreground text only, lower-third placement */
+  html.view-overlay, html.view-overlay body { background: transparent; }
+  .view-overlay .slide { background-image: none !important; align-items: flex-end; }
+  .view-overlay .gradient-top, .view-overlay .gradient-bottom, .view-overlay .bug,
+  .view-overlay .progress, .view-overlay .controls, .view-overlay .blackout { display: none; }
+  .view-overlay .content {
+    width: 100%; max-width: none; text-align: center; padding: 4vh 8% 6vh;
+    background: linear-gradient(to top, rgba(0,0,0,0.55), transparent);
+  }
+  .view-overlay .content h1 { font-size: 2.6rem; margin-bottom: 0.6rem; text-shadow: 0 2px 8px rgba(0,0,0,0.9); }
+  .view-overlay .content li { padding-left: 0; text-shadow: 0 2px 6px rgba(0,0,0,0.9); }
+  .view-overlay .content li::before { content: none; }
+  .view-overlay.blacked .slide { opacity: 0; }
 </style>
 </head>
 <body>
   <div class="progress" id="progress"></div>
+  <div class="blackout" id="blackout"></div>
   
   <!-- SLIDES_PLACEHOLDER -->
   
@@ -166,7 +251,17 @@
   const slides = document.querySelectorAll('.slide');
   let current = 0;
   const progress = document.getElementById('progress');
-  
+
+  // View selection (hub 1214). The macOS app injects window.__presenterView before
+  // load; a browser uses ?view=audience|confidence|control|overlay.
+  const root = document.documentElement;
+  const view = window.__presenterView || new URLSearchParams(location.search).get('view') || 'audience';
+  const nativeBridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.presenter;
+  const state = { black: false, timerStart: Date.now() };
+  const viewHooks = [];
+  root.classList.add('view-' + view);
+  if (nativeBridge) root.classList.add('in-app');
+
   function showSlide(n) {
     slides.forEach((s, i) => s.classList.toggle('active', i === n));
     current = n;
@@ -187,13 +282,58 @@
       bug.offsetHeight;
       bug.style.animation = null;
     }
+
+    viewHooks.forEach(fn => fn(n));
   }
-  
+
+  // Render a state. Never re-broadcasts, so every window can apply the same state.
+  function applyState(s) {
+    if (Number.isInteger(s.index) && s.index >= 0 && s.index < slides.length && s.index !== current) showSlide(s.index);
+    if (typeof s.black === 'boolean') {
+      state.black = s.black;
+      root.classList.toggle('blacked', s.black);
+    }
+    if (typeof s.timerStart === 'number') state.timerStart = s.timerStart;
+    renderClock();
+  }
+
+  function currentState() {
+    return { index: current, black: state.black, timerStart: state.timerStart };
+  }
+
+  // Sync: inside the app, Swift owns the state and pushes it to all three windows.
+  // In plain browsers, tabs of the same deck stay in step over a BroadcastChannel.
+  const channel = (!nativeBridge && 'BroadcastChannel' in window) ? new BroadcastChannel('markdown-presenter:' + location.pathname) : null;
+  if (channel) {
+    channel.onmessage = (e) => {
+      if (e.data && e.data.kind === 'state') applyState(e.data.state);
+      if (e.data && e.data.kind === 'hello') channel.postMessage({ kind: 'state', state: currentState() });
+    };
+  }
+
+  function requestState(patch) {
+    if (nativeBridge) {
+      nativeBridge.postMessage(Object.assign({ type: 'request' }, patch));
+      return;
+    }
+    applyState(patch);
+    if (channel) channel.postMessage({ kind: 'state', state: currentState() });
+  }
+
+  // PowerPoint/Proclaim behaviour: an advance key while blacked only lifts the black.
   function nextSlide() {
-    if (current < slides.length - 1) showSlide(current + 1);
+    if (state.black) return requestState({ black: false });
+    if (current < slides.length - 1) requestState({ index: current + 1 });
   }
   function prevSlide() {
-    if (current > 0) showSlide(current - 1);
+    if (state.black) return requestState({ black: false });
+    if (current > 0) requestState({ index: current - 1 });
+  }
+  function toggleBlack() {
+    requestState({ black: !state.black });
+  }
+  function resetTimer() {
+    requestState({ timerStart: Date.now() });
   }
   function toggleFullscreen() {
     if (!document.fullscreenElement) {
@@ -204,11 +344,15 @@
   }
   
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); nextSlide(); }
-    if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prevSlide(); }
-    if (e.key === 'f' || e.key === 'F') toggleFullscreen();
-    if (e.key === 'Home') showSlide(0);
-    if (e.key === 'End') showSlide(slides.length - 1);
+    // In the app, keys are routed natively so every window and clicker behaves the same.
+    if (nativeBridge) return;
+    const k = e.key;
+    if (k === 'ArrowRight' || k === 'ArrowDown' || k === ' ' || k === 'PageDown') { e.preventDefault(); nextSlide(); }
+    if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp') { e.preventDefault(); prevSlide(); }
+    if (k === 'b' || k === 'B' || k === '.') toggleBlack();
+    if (k === 'f' || k === 'F') toggleFullscreen();
+    if (k === 'Home') requestState({ index: 0 });
+    if (k === 'End') requestState({ index: slides.length - 1 });
   });
   
   // Touch swipe support
@@ -220,8 +364,126 @@
       if (diff > 0) nextSlide(); else prevSlide();
     }
   });
-  
+
+  // ---- Clock and timer (confidence and control views) ----
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function renderClock() {
+    const now = new Date();
+    const secs = Math.max(0, Math.floor((Date.now() - state.timerStart) / 1000));
+    const timer = (secs >= 3600 ? Math.floor(secs / 3600) + ':' : '') + pad(Math.floor(secs / 60) % 60) + ':' + pad(secs % 60);
+    const clock = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    document.querySelectorAll('[data-clock]').forEach(el => { el.textContent = clock; });
+    document.querySelectorAll('[data-timer]').forEach(el => { el.textContent = timer; });
+  }
+
+  function slideTitle(i) {
+    const h = slides[i] && slides[i].querySelector('h1');
+    return h ? h.textContent : '';
+  }
+
+  // ---- Confidence view: real slides scaled into a 1920x1080 stage, a cloned next slide, notes ----
+  function setupConfidence() {
+    const cm = document.createElement('div');
+    cm.className = 'cm';
+    cm.innerHTML =
+      '<header class="cm-bar"><span class="cm-pos"></span><span class="black-badge">BLACK</span>' +
+      '<span class="cm-spacer"></span><span class="cm-timer" data-timer></span><span class="cm-clock" data-clock></span></header>' +
+      '<section class="cm-stage cm-current"><div class="cm-canvas"></div></section>' +
+      '<section class="cm-stage cm-next"><div class="cm-label">Next</div><div class="cm-canvas"></div><div class="cm-end">End</div></section>' +
+      '<section class="cm-notes"></section>';
+    document.body.appendChild(cm);
+    const [curCanvas, nextCanvas] = cm.querySelectorAll('.cm-canvas');
+    const pos = cm.querySelector('.cm-pos');
+    const notes = cm.querySelector('.cm-notes');
+    const endCard = cm.querySelector('.cm-end');
+    slides.forEach(s => curCanvas.appendChild(s));
+    const clones = Array.from(slides, s => {
+      const c = s.cloneNode(true);
+      c.classList.remove('active');
+      nextCanvas.appendChild(c);
+      return c;
+    });
+
+    function fit() {
+      [curCanvas, nextCanvas].forEach(c => {
+        const box = c.parentElement.getBoundingClientRect();
+        const scale = Math.min(box.width / 1920, box.height / 1080);
+        c.style.transform = 'scale(' + scale + ')';
+        c.style.left = ((box.width - 1920 * scale) / 2) + 'px';
+        c.style.top = ((box.height - 1080 * scale) / 2) + 'px';
+      });
+    }
+    window.addEventListener('resize', fit);
+    fit();
+
+    viewHooks.push(n => {
+      clones.forEach((c, i) => c.classList.toggle('active', i === n + 1));
+      endCard.style.display = n + 1 < slides.length ? 'none' : 'flex';
+      pos.textContent = 'Slide ' + (n + 1) + ' / ' + slides.length;
+      const src = slides[n].querySelector('.notes');
+      notes.innerHTML = src ? src.innerHTML : '';
+      if (!src) notes.textContent = 'No notes';
+      notes.classList.toggle('empty', !src);
+      notes.scrollTop = 0;
+    });
+  }
+
+  // ---- Control view: transport buttons plus a grid of every slide ----
+  function setupControl() {
+    const ctl = document.createElement('div');
+    ctl.className = 'ctl';
+    ctl.innerHTML =
+      '<header class="ctl-bar"><button data-act="prev">&larr; Prev</button><button data-act="next">Next &rarr;</button>' +
+      '<button class="ctl-black" data-act="black">Black (B)</button><button data-act="timer">Reset timer</button>' +
+      '<span class="cm-pos"></span><span class="black-badge">BLACK</span><span class="cm-spacer"></span>' +
+      '<span class="cm-timer" data-timer></span><span class="cm-clock" data-clock></span></header>' +
+      '<div class="ctl-grid"></div>';
+    document.body.appendChild(ctl);
+    const grid = ctl.querySelector('.ctl-grid');
+    const pos = ctl.querySelector('.cm-pos');
+    const cards = Array.from(slides, (s, i) => {
+      const b = document.createElement('button');
+      b.className = 'ctl-card';
+      b.style.backgroundImage = s.style.backgroundImage;
+      const label = document.createElement('span');
+      label.textContent = (i + 1) + '. ' + slideTitle(i);
+      b.appendChild(label);
+      b.addEventListener('click', () => requestState({ index: i, black: false }));
+      grid.appendChild(b);
+      return b;
+    });
+    const actions = { prev: prevSlide, next: nextSlide, black: toggleBlack, timer: resetTimer };
+    ctl.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => actions[b.dataset.act]()));
+    viewHooks.push(n => {
+      cards.forEach((c, i) => {
+        c.classList.toggle('current', i === n);
+        c.classList.toggle('next', i === n + 1);
+      });
+      pos.textContent = 'Slide ' + (n + 1) + ' / ' + slides.length;
+      cards[n].scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  // Only the audience view makes sound (play does not bubble, so listen in the capture phase).
+  if (view !== 'audience') document.addEventListener('play', e => { e.target.muted = true; }, true);
+
+  if (view === 'confidence') setupConfidence();
+  if (view === 'control') setupControl();
+  if (view === 'confidence' || view === 'control') setInterval(renderClock, 1000);
+
+  // Bridge surface for the macOS app (evaluateJavaScript calls presenter.apply).
+  window.presenter = {
+    view: view,
+    count: slides.length,
+    apply: applyState,
+    state: currentState,
+    titles: () => Array.from(slides, (s, i) => slideTitle(i))
+  };
+
   showSlide(0);
+  renderClock();
+  if (nativeBridge) nativeBridge.postMessage({ type: 'ready', view: view, count: slides.length, titles: window.presenter.titles() });
+  if (channel) channel.postMessage({ kind: 'hello' });
 </script>
 </body>
 </html>
