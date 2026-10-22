@@ -58,6 +58,10 @@ final class OverlayOutput {
         self.timer = timer
     }
 
+    func reload() {
+        page.reload()
+    }
+
     func stop() {
         timer?.invalidate()
         timer = nil

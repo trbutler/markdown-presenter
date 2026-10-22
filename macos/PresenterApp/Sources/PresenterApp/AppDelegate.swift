@@ -175,6 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func reloadDeck() {
         windowManager?.reloadAll()
+        overlay?.reload()
     }
 
     @objc private func showAllViews() {
