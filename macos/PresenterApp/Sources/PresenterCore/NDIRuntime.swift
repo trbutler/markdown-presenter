@@ -27,7 +27,7 @@ public enum NDIRuntimeError: Error, CustomStringConvertible {
         case .noUsableRuntime(let searched, let missing):
             return "No usable NDI runtime (looked in: \(searched.joined(separator: ", "))); NDIlib_v5_load missing in: \(missing.joined(separator: ", "))"
         case .bindingNotImplemented:
-            return "NDI send binding not written yet (needs the NDI SDK headers; see NDIFrameSink)"
+            return "NDI send binding not written yet (needs verified NDI SDK headers and a GPUFrame adapter)"
         }
     }
 }
@@ -37,7 +37,7 @@ public final class NDIRuntime {
     public let path: String
     /// Address of `NDIlib_v5_load`, which returns `const NDIlib_v5*`, a table of
     /// C function pointers declared in the SDK's Processing.NDI.DynamicLoad.h.
-    /// The NDI v6 runtime still exports this entry point.
+    /// VERIFY-ON-MAC/SDK: confirm this entry point in the installed NDI runtime.
     public let loadEntryPoint: UnsafeMutableRawPointer
     private let handle: UnsafeMutableRawPointer
     private let closeHandle: (UnsafeMutableRawPointer) -> Void
@@ -50,8 +50,8 @@ public final class NDIRuntime {
     }
 
     /// Where to look, in order. The runtime-dir variables are the SDK's own
-    /// redistributable convention; /usr/local/lib is where the macOS NDI
-    /// runtime installer puts libndi.dylib.
+    /// redistributable convention. VERIFY-ON-MAC/SDK: confirm these environment
+    /// keys, installer paths and ABI against the actual installed runtime.
     public static func candidatePaths(environment: [String: String] = ProcessInfo.processInfo.environment) -> [String] {
         #if os(macOS)
         let libraryName = "libndi.dylib"
@@ -102,46 +102,5 @@ public final class NDIRuntime {
     }
 }
 
-/// NDI sender for overlay frames.
-///
-/// ===================== NDI SDK PLUG-IN POINT =====================
-/// This is the only place NDI code goes. To finish it (phase 3 of the plan):
-///  1. Add the SDK's MIT-licensed header Processing.NDI.DynamicLoad.h (and the
-///     headers it includes) as a small C target, e.g. `CNDI`, with a module map.
-///     Do not add libndi itself; it stays a user-installed runtime.
-///  2. Cast `runtime.loadEntryPoint` to `@convention(c) () -> UnsafePointer<NDIlib_v5>?`
-///     and call it to get the function table.
-///  3. start(): table.initialize(); create an `NDIlib_send_create_t` with
-///     p_ndi_name = sourceName, clock_video = false (we pace frames ourselves),
-///     then table.send_create(&settings).
-///  4. send(): fill `NDIlib_video_frame_v2_t` with xres/yres, FourCC BGRA,
-///     frame_rate_N/D, frame_format_type progressive, line_stride_in_bytes =
-///     frame.bytesPerRow, p_data = frame.pixels, timecode synthesized; call
-///     table.send_send_video_v2 (synchronous copy) or send_send_video_async_v2
-///     (zero copy: keep the buffer alive until the next call).
-///  5. stop(): send_destroy, then destroy().
-///  6. Settle premultiplied vs straight alpha against the SDK docs for BGRA
-///     and set `preferredFormat`; the capture side converts either way.
-/// ==================================================================
-public final class NDIFrameSink: FrameSink {
-    /// Flip to true once steps 1-6 above are done.
-    public static let bindingImplemented = false
-
-    public let displayName = "NDI"
-    public let preferredFormat = PixelFormat.bgra8Straight
-    public let runtime: NDIRuntime
-
-    public init(runtime: NDIRuntime) {
-        self.runtime = runtime
-    }
-
-    public func start(sourceName: String, width: Int, height: Int, framesPerSecond: Double) throws {
-        throw NDIRuntimeError.bindingNotImplemented
-    }
-
-    public func send(_ frame: VideoFrame) {
-    }
-
-    public func stop() {
-    }
-}
+// The GPUFrame sender adapter now lives in PresenterApp/OverlayOutput.swift.
+// No SDK table layout or CPU pixel-buffer binding is guessed in PresenterCore.

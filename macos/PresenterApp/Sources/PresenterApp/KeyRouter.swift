@@ -10,7 +10,10 @@ final class KeyRouter {
     private var monitor: Any?
 
     init(controller: DeckController) {
+        // VERIFY-ON-MAC: local event monitor isolation/main-thread callback contract.
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak controller] event in
+            // Preferences and untrusted Custom pages retain their normal keys.
+            guard MainActor.assumeIsolated({ controller?.ownsFocusedWindow == true }) else { return event }
             let chord = !event.modifierFlags.intersection([.command, .control, .option]).isEmpty
             guard let command = KeyMap.command(keyCode: event.keyCode, characters: event.charactersIgnoringModifiers, hasCommandModifiers: chord) else {
                 return event
