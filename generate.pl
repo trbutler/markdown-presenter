@@ -4,6 +4,8 @@ use warnings;
 use utf8;
 use FindBin;
 use JSON::PP;
+use lib "$FindBin::Bin/lib";
+use MdPresenter::Expand qw(expandFile);
 binmode STDOUT, ':utf8';
 binmode STDERR, ':utf8';
 
@@ -14,9 +16,8 @@ binmode STDERR, ':utf8';
 my $input  = shift @ARGV or die "Usage: $0 <markdown-file> [output.html]\n";
 my $output = shift @ARGV;
 
-open my $fh, '<:utf8', $input or die "Cannot open $input: $!";
-my $md = do { local $/; <$fh> };
-close $fh;
+# !include and !scripture lines are expanded here, before the deck is split.
+my $md = expandFile($input);
 $md =~ s/\r\n/\n/g;
 $md =~ s/\r/\n/g;
 
@@ -61,8 +62,24 @@ sub parse_slide {
     my %dir;
     my ($kicker, $title, $bg, $video) = ('', '', '', '');
     my (@bullets, @subtitle);
+    my (@notes, $inNotes);
 
     foreach my $line (@lines) {
+        # Speaker notes: "Note:" (or "Notes:") at the start of a line, or
+        # <!-- notes -->, runs to the end of the slide or to <!-- /notes -->.
+        if ($inNotes) {
+            if ($line =~ /^\s*<!--\s*\/notes\s*-->\s*$/i) {
+                $inNotes = 0;
+            } else {
+                push @notes, $line;
+            }
+            next;
+        }
+        if ($line =~ /^(?:Notes?:|<!--\s*notes\s*-->)\s*(.*?)\s*$/) {
+            $inNotes = 1;
+            push @notes, $1 if length $1;
+            next;
+        }
         if ($line =~ /^\s*\/\/\s*([A-Za-z][\w-]*)(?:\s*:\s*(.*?))?\s*$/) {
             my ($key, $value) = ($1, $2);
             $value =~ s/\s+$// if defined $value;
@@ -99,6 +116,7 @@ sub parse_slide {
         video    => $video // '',
         has      => $has ? 1 : 0,
         glued    => (defined $dir{position} && $dir{position} eq 'glued') ? 1 : 0,
+        notes    => trimBlankLines(@notes),
     };
 }
 
@@ -119,7 +137,10 @@ sub build_model {
 
     my $new_section = sub {
         my ($name) = @_;
-        my $section = { name => $name // '', insert => 1, audio => undef, slides => [] };
+        my $section = {
+            name => $name // '', insert => 1, audio => undef, slides => [],
+            countdown => undef, countdownLabel => undef, countdownEnd => undef, cycle => undef,
+        };
         push @sections, $section;
         return $section;
     };
@@ -129,7 +150,7 @@ sub build_model {
         my $dir = $slide->{dir};
 
         foreach my $unknown (sort keys %$dir) {
-            next if $unknown =~ /^(seed|autoAdvance|loop|fade|audio|type|section|insert|position|video|backdrop|name|title|buildIn|buildOut)$/;
+            next if $unknown =~ /^(seed|autoAdvance|loop|fade|audio|type|section|insert|position|video|backdrop|name|title|buildIn|buildOut|translation|countdown|countdownEnd|cycle)$/;
             warn "Unknown directive //$unknown\n";
         }
 
@@ -179,6 +200,24 @@ sub build_model {
             $current->{insert} = int($n);
         }
 
+        # Announcement loops: // cycle: 8s keeps the section turning over
+        # until the operator moves on. // countdown: 10:30 shows the time left
+        # to that clock time; // countdownEnd: next leaves the section at zero.
+        if (exists $dir->{cycle}) {
+            $current ||= $new_section->('');
+            $current->{cycle} = duration_ms($dir->{cycle});
+        }
+        if (exists $dir->{countdown}) {
+            $current ||= $new_section->('');
+            ($current->{countdown}, $current->{countdownLabel}) = countdownTime($dir->{countdown});
+        }
+        if (exists $dir->{countdownEnd}) {
+            my $end = $dir->{countdownEnd} // '';
+            die "Bad countdownEnd: $end (use stay or next)\n" unless $end =~ /^(stay|next)$/;
+            $current ||= $new_section->('');
+            $current->{countdownEnd} = $end;
+        }
+
         if (exists $dir->{audio}) {
             my $audio = $dir->{audio};
             die "// audio needs a path or stop\n" unless defined $audio && length $audio;
@@ -218,9 +257,13 @@ sub render {
 
     my @section_json = map {
         {
-            name   => $_->{name},
-            insert => $_->{insert},
-            audio  => $_->{audio},
+            name           => $_->{name},
+            insert         => $_->{insert},
+            audio          => $_->{audio},
+            cycle          => $_->{cycle},
+            countdown      => $_->{countdown},
+            countdownLabel => $_->{countdownLabel},
+            countdownEnd   => $_->{countdownEnd},
         }
     } @{ $model->{sections} };
 
@@ -258,7 +301,7 @@ sub slide_html {
         $src =~ s/ /%20/g;
         push @attrs, 'data-video="' . $src . '"';
         my $attr = join ' ', @attrs;
-        my $lower = lower_third_html($slide);
+        my $lower = lower_third_html($slide) . notesHtml($slide);
         my $blur = defined $slide->{dir}{backdrop} && $slide->{dir}{backdrop} eq 'blur';
         my $videos = $blur
             ? qq{    <canvas class="video-fill" aria-hidden="true"></canvas>\n}
@@ -293,6 +336,7 @@ HTML
             . join('', map { '        <li>' . esc($_) . "</li>\n" } @{ $slide->{bullets} })
             . "      </ul>\n";
     }
+    my $notes = notesHtml($slide);
     my $attr = join ' ', @attrs;
     return <<"HTML";
   <div $attr>
@@ -304,7 +348,7 @@ $bg    <div class="gradient-top"></div>
     </div>
 $kicker    <div class="content">
 $title$subtitle$bullets    </div>
-  </div>
+$notes  </div>
 HTML
 }
 
@@ -355,4 +399,43 @@ sub boolish {
     return 0 if $value =~ /^(0|false|no|off)$/i;
     return 1 if $value =~ /^(1|true|yes|on)$/i;
     die "Bad boolean: $value\n";
+}
+
+sub trimBlankLines {
+    my (@lines) = @_;
+    shift @lines while @lines && $lines[0] !~ /\S/;
+    pop @lines while @lines && $lines[-1] !~ /\S/;
+    return join("\n", @lines);
+}
+
+# Notes ride inside the slide and are never shown there; the notes view
+# copies them into its own panel.
+sub notesHtml {
+    my ($slide) = @_;
+    return '' unless defined $slide->{notes} && length $slide->{notes};
+    my @paras = split /\n\s*\n/, $slide->{notes};
+    my $body = join('', map {
+        my $p = $_;
+        $p =~ s/^\s+|\s+$//g;
+        '      <p>' . join('<br>', map { esc($_) } split /\n/, $p) . "</p>\n";
+    } @paras);
+    return qq{    <aside class="notes" aria-hidden="true">\n$body    </aside>\n};
+}
+
+# "10:30", "10:30am", "7:05 PM", optionally followed by a label:
+# "10:30 Worship begins in". Returns ("HH:MM", label or undef).
+sub countdownTime {
+    my ($value) = @_;
+    die "// countdown needs a time like 10:30\n" unless defined $value && length $value;
+    die "Bad countdown: $value\n"
+        unless $value =~ /^(\d{1,2}):(\d{2})\s*([AaPp][Mm])?(?:\s+(.*))?$/;
+    my ($h, $m, $ampm, $label) = ($1, $2, $3, $4);
+    if (defined $ampm) {
+        die "Bad countdown: $value\n" if $h < 1 || $h > 12;
+        $h = 0 if $h == 12;
+        $h += 12 if lc($ampm) eq 'pm';
+    }
+    die "Bad countdown: $value\n" if $h > 23 || $m > 59;
+    $label = undef if defined $label && $label !~ /\S/;
+    return (sprintf('%02d:%02d', $h, $m), $label);
 }

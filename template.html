@@ -366,12 +366,165 @@
   body.no-chrome .controls {
     display: none;
   }
+  /* Views (hub 1213). ?view=audience|notes|lyrics|overlay|service puts
+     view-<name> on <html> and <body>. Audience is the default. */
+  .notes { display: none; }
+  .notes-panel, .status-bar, .service-panel, .countdown, .black-badge { display: none; }
+
+  body.blacked:not(.view-notes):not(.view-service) .slide,
+  body.blacked:not(.view-notes):not(.view-service) .countdown {
+    visibility: hidden;
+  }
+
+  .countdown {
+    position: fixed;
+    top: 4vh;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 60;
+    padding: 0.35em 0.9em;
+    border-radius: 0.4em;
+    background: rgba(0,0,0,0.55);
+    font-family: "D-DIN Condensed", "Arial Narrow", sans-serif;
+    font-size: 4.2vh;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  body.has-countdown:not(.view-notes):not(.view-service):not(.view-lyrics) .countdown { display: block; }
+
+  /* Lyrics: words only, on a transparent page, for an OBS browser source. */
+  html.view-lyrics, body.view-lyrics,
+  html.view-overlay, body.view-overlay { background: transparent; }
+  .view-lyrics .slide-bg,
+  .view-lyrics .gradient-top,
+  .view-lyrics .gradient-bottom,
+  .view-lyrics .bug,
+  .view-lyrics .kicker,
+  .view-lyrics .slide-video,
+  .view-lyrics .lower-third { display: none; }
+  .view-lyrics .content {
+    --content-shadow:
+      0 0 3px rgba(0,0,0,1),
+      0 0 8px rgba(0,0,0,0.95),
+      0 0 22px rgba(0,0,0,0.8);
+  }
+
+  /* Overlay: only graphics that sit over a camera (lower thirds, countdown). */
+  .view-overlay .slide-bg,
+  .view-overlay .gradient-top,
+  .view-overlay .gradient-bottom,
+  .view-overlay .bug,
+  .view-overlay .kicker,
+  .view-overlay .content,
+  .view-overlay .slide-video video,
+  .view-overlay .slide-video canvas { display: none; }
+
+  /* Notes: the slide small at top left, notes on the right, status below. */
+  body.view-notes { background: #111; }
+  body.view-notes .slide {
+    width: 100vw;
+    height: 100vh;
+    transform: scale(0.6);
+    transform-origin: 0 0;
+    outline: 2px solid #333;
+  }
+  body.view-notes .notes-panel {
+    display: block;
+    position: fixed;
+    top: 0; right: 0; bottom: 0;
+    left: 61vw;
+    padding: 3vh 2.5vw;
+    overflow: auto;
+    background: #181818;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 3.4vh;
+    line-height: 1.4;
+  }
+  .notes-panel .notes-title { font-size: 0.7em; color: #a8d5a2; margin-bottom: 0.8em; text-transform: uppercase; letter-spacing: 0.08em; }
+  .notes-panel p { margin-bottom: 0.8em; }
+  .notes-panel .empty { color: #777; font-style: italic; }
+  body.view-notes .status-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.2em 2em;
+    position: fixed;
+    top: 62vh;
+    left: 2vw;
+    width: 57vw;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 2.8vh;
+    color: #ddd;
+  }
+  .status-bar .clock { font-size: 1.6em; font-variant-numeric: tabular-nums; color: #fff; }
+  .status-bar .next { flex-basis: 100%; color: #aaa; }
+  .status-bar .countdown-copy:empty { display: none; }
+  body.view-notes.blacked .black-badge,
+  body.view-service.blacked .black-badge {
+    display: block;
+    position: fixed;
+    top: 1vh; left: 1vw;
+    z-index: 300;
+    padding: 0.3em 0.8em;
+    background: #b00020;
+    color: #fff;
+    font: 700 2.4vh -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    border-radius: 0.3em;
+  }
+  body.view-notes .controls { left: 30vw; opacity: 0.8; }
+
+  /* Service order: every section and slide heading, click to jump.
+     view=service is the whole page; S opens it over any other view. */
+  body.view-service { background: #111; }
+  body.view-service .slide,
+  body.view-service .progress { display: none; }
+  body.view-service .service-panel,
+  body.service-open .service-panel {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    overflow: auto;
+    padding: 3vh 4vw 12vh;
+    background: rgba(17,17,17,0.97);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 20px;
+  }
+  body.service-open:not(.view-service) .service-panel { inset: 6vh 18vw; border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
+  .service-panel h2 { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.1em; color: #a8d5a2; margin: 1.4em 0 0.4em; }
+  .service-panel ol { list-style: none; }
+  .service-panel button {
+    display: flex;
+    gap: 1em;
+    width: 100%;
+    text-align: left;
+    padding: 0.45em 0.7em;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #eee;
+    font-size: 1em;
+    cursor: pointer;
+  }
+  .service-panel button:hover { background: #2a2a2a; }
+  .service-panel button.current { background: #3c4b29; color: #fff; }
+  .service-panel .num { width: 2.5em; color: #888; font-variant-numeric: tabular-nums; }
+  .service-panel .sub { color: #999; margin-left: auto; font-size: 0.85em; }
+  .service-panel .filler .label { font-style: italic; }
 </style>
 </head>
 <body>
   <div class="progress" id="progress"></div>
 
   <!-- SLIDES_PLACEHOLDER -->
+
+  <div class="countdown" id="countdown"></div>
+  <div class="black-badge" id="blackBadge">Screen is black (B to restore)</div>
+  <aside class="notes-panel" id="notesPanel"><div class="notes-title" id="notesTitle"></div><div id="notesBody"></div></aside>
+  <div class="status-bar" id="statusBar"></div>
+  <nav class="service-panel" id="servicePanel" aria-label="Service order"></nav>
 
   <div class="controls">
     <button onclick="prevSlide()">← Prev</button>
@@ -398,6 +551,268 @@
   let currentSrc = null;
   let heldTime = 0;
   let heldForVideo = false;
+
+  // ---- Views (hub 1213) ----------------------------------------------
+  const views = ['audience', 'notes', 'lyrics', 'overlay', 'service'];
+  let view = (params.get('view') || 'audience').toLowerCase();
+  if (!views.includes(view)) view = 'audience';
+  document.documentElement.classList.add('view-' + view);
+  document.body.classList.add('view-' + view);
+  document.body.dataset.view = view;
+  if (view === 'lyrics' || view === 'overlay') document.body.classList.add('no-chrome');
+  // Only the audience view makes sound. The others are control screens or keys.
+  const silent = view !== 'audience' || /^(1|on|true|yes)$/i.test(params.get('mute') || '');
+  if (silent) {
+    player.muted = true;
+    document.querySelectorAll('video').forEach(video => { video.muted = true; });
+  }
+
+  const countdownEl = document.getElementById('countdown');
+  const notesTitle = document.getElementById('notesTitle');
+  const notesBody = document.getElementById('notesBody');
+  const statusBar = document.getElementById('statusBar');
+  const servicePanel = document.getElementById('servicePanel');
+  let blacked = false;
+
+  // Windows of the same deck follow each other: open ?view=notes on the
+  // laptop and the plain deck on the projector, and either one drives.
+  const peerId = Math.random().toString(36).slice(2);
+  let channel = null;
+  try { channel = new BroadcastChannel('mdp:' + location.pathname); } catch (err) { channel = null; }
+  function post(msg) {
+    if (!channel) return;
+    msg.from = peerId;
+    try { channel.postMessage(msg); } catch (err) {}
+  }
+  function nodeIndex(slide) {
+    return [...document.querySelectorAll('.slide')].indexOf(slide);
+  }
+  if (channel) {
+    channel.onmessage = (event) => {
+      const msg = event.data || {};
+      if (msg.from === peerId) return;
+      if (msg.type === 'show') {
+        const node = document.querySelectorAll('.slide')[msg.node];
+        let n = msg.n;
+        if (!playOrder[n] || playOrder[n].slide !== node) {
+          const k = playOrder.findIndex(item => item.slide === node);
+          if (k >= 0) n = k;
+        }
+        if (playOrder[n] && n !== current) showSlide(n, true);
+        if (typeof msg.black === 'boolean' && msg.black !== blacked) setBlack(msg.black, true);
+      } else if (msg.type === 'black') {
+        setBlack(!!msg.on, true);
+      } else if (msg.type === 'hello') {
+        post({ type: 'show', n: current, node: nodeIndex(playOrder[current] && playOrder[current].slide), black: blacked });
+      }
+    };
+  }
+
+  function setBlack(on, fromRemote) {
+    blacked = !!on;
+    document.body.classList.toggle('blacked', blacked);
+    if (!fromRemote) post({ type: 'black', on: blacked });
+    updateStatus();
+  }
+
+  function sectionSpec(n) {
+    const item = playOrder[n];
+    if (!item) return null;
+    return (deck.sections || [])[item.sectionIndex] || null;
+  }
+
+  function sectionBounds(n) {
+    const s = playOrder[n].sectionIndex;
+    let a = n;
+    let b = n;
+    while (a > 0 && playOrder[a - 1].sectionIndex === s) a--;
+    while (b < playOrder.length - 1 && playOrder[b + 1].sectionIndex === s) b++;
+    return [a, b];
+  }
+
+  // Timer-driven advance. A // cycle: section wraps to its own first slide;
+  // the operator's Next on its last slide leaves it.
+  function autoNext() {
+    const spec = sectionSpec(current);
+    if (spec && spec.cycle) {
+      const [a, b] = sectionBounds(current);
+      showSlide(current < b ? current + 1 : a);
+      return;
+    }
+    nextSlide();
+  }
+
+  function slideLabel(slide) {
+    const pick = (sel) => {
+      const el = slide.querySelector(sel);
+      return el ? el.textContent.trim() : '';
+    };
+    const title = pick('.content h1');
+    const kicker = pick('.kicker');
+    if (title) return { label: title, sub: kicker };
+    if (kicker) return { label: kicker, sub: '' };
+    if (slide.dataset.kind === 'video') {
+      const name = pick('.lt-name');
+      return { label: 'Video: ' + (name || (slide.dataset.video || '').split('/').pop()), sub: '' };
+    }
+    const text = pick('.subtitle') || pick('.content li');
+    return { label: text ? text.slice(0, 60) : '(untitled)', sub: '' };
+  }
+
+  // ---- Countdown to a clock time ----------------------------------------
+  // ?now=10:25 pretends the clock says 10:25, for rehearsing a countdown.
+  let clockOffset = 0;
+  const nowParam = params.get('now');
+  if (nowParam && /^\d{1,2}:\d{2}(:\d{2})?$/.test(nowParam)) {
+    const [h, m, s] = nowParam.split(':').map(Number);
+    const d = new Date();
+    d.setHours(h, m, s || 0, 0);
+    clockOffset = d.getTime() - Date.now();
+  }
+  function clockNow() { return new Date(Date.now() + clockOffset); }
+  function countdownTarget(hhmm) {
+    const [h, m] = hhmm.split(':').map(Number);
+    const now = clockNow();
+    const target = new Date(now.getTime());
+    target.setHours(h, m, 0, 0);
+    if (target - now < -12 * 3600e3) target.setDate(target.getDate() + 1);
+    return target;
+  }
+  function formatLeft(ms) {
+    const total = Math.max(0, Math.ceil(ms / 1000));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor(total % 3600 / 60);
+    const s = total % 60;
+    const pad = (x) => String(x).padStart(2, '0');
+    return h ? h + ':' + pad(m) + ':' + pad(s) : m + ':' + pad(s);
+  }
+  // countdownEnd: next fires only when this window saw time left on that
+  // section, so opening the deck late (or rehearsing after) never jumps.
+  let countdownFiredFor = null;
+  const countdownArmed = new Set();
+  function countdownText() {
+    const spec = sectionSpec(current);
+    if (!spec || !spec.countdown) return '';
+    const sectionIndex = playOrder[current].sectionIndex;
+    const left = countdownTarget(spec.countdown) - clockNow();
+    if (left > 0) countdownArmed.add(sectionIndex);
+    if (left <= 0) {
+      if (spec.countdownEnd === 'next' && countdownArmed.has(sectionIndex) && countdownFiredFor !== sectionIndex) {
+        countdownFiredFor = sectionIndex;
+        const [, b] = sectionBounds(current);
+        if (b < playOrder.length - 1) setTimeout(() => showSlide(b + 1), 0);
+      }
+      return 'Starting now';
+    }
+    return (spec.countdownLabel || 'Service begins in') + ' ' + formatLeft(left);
+  }
+  function tick() {
+    const text = countdownText();
+    document.body.classList.toggle('has-countdown', !!text);
+    if (countdownEl.textContent !== text) countdownEl.textContent = text;
+    updateStatus();
+  }
+
+  // ---- Notes, status and service order ----------------------------------
+  function updateNotes() {
+    if (view !== 'notes') return;
+    const slide = playOrder[current] && playOrder[current].slide;
+    if (!slide) return;
+    notesTitle.textContent = slideLabel(slide).label;
+    const aside = slide.querySelector('.notes');
+    if (aside) notesBody.innerHTML = aside.innerHTML;
+    else notesBody.innerHTML = '<p class="empty">No notes for this slide.</p>';
+  }
+
+  function updateStatus() {
+    if (view !== 'notes' || !playOrder.length) return;
+    const spec = sectionSpec(current) || {};
+    const next = playOrder[current + 1];
+    const parts = [
+      ['clock', clockNow().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })],
+      ['pos', 'Slide ' + (current + 1) + ' / ' + playOrder.length],
+      ['section', spec.name || ''],
+      ['countdown-copy', countdownText()],
+      ['black', blacked ? 'BLACK' : ''],
+      ['next', next ? 'Next: ' + slideLabel(next.slide).label : 'Next: (end)'],
+    ];
+    const html = parts.filter(p => p[1]).map(p => {
+      const span = document.createElement('span');
+      span.className = p[0];
+      span.textContent = p[1];
+      return span.outerHTML;
+    }).join('');
+    if (statusBar.innerHTML !== html) statusBar.innerHTML = html;
+  }
+
+  function buildServicePanel() {
+    servicePanel.textContent = '';
+    let lastSection = null;
+    let list = null;
+    playOrder.forEach((item, i) => {
+      if (item.sectionIndex !== lastSection) {
+        lastSection = item.sectionIndex;
+        const spec = (deck.sections || [])[lastSection] || {};
+        const head = document.createElement('h2');
+        head.textContent = spec.name || ('Section ' + (lastSection + 1));
+        servicePanel.appendChild(head);
+        list = document.createElement('ol');
+        servicePanel.appendChild(list);
+      }
+      const info = slideLabel(item.slide);
+      const li = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.index = String(i);
+      if (item.slide.dataset.deck === 'filler') button.classList.add('filler');
+      const num = document.createElement('span');
+      num.className = 'num';
+      num.textContent = String(i + 1);
+      const label = document.createElement('span');
+      label.className = 'label';
+      label.textContent = info.label;
+      button.append(num, label);
+      if (info.sub) {
+        const sub = document.createElement('span');
+        sub.className = 'sub';
+        sub.textContent = info.sub;
+        button.appendChild(sub);
+      }
+      button.addEventListener('click', () => {
+        showSlide(i);
+        if (view !== 'service') closeService();
+      });
+      li.appendChild(button);
+      list.appendChild(li);
+    });
+  }
+
+  function markService() {
+    servicePanel.querySelectorAll('button.current').forEach(b => b.classList.remove('current'));
+    const button = servicePanel.querySelector('button[data-index="' + current + '"]');
+    if (!button) return;
+    button.classList.add('current');
+    if (view === 'service' || document.body.classList.contains('service-open')) {
+      button.scrollIntoView({ block: 'nearest' });
+    }
+  }
+  function toggleService() {
+    if (view === 'service') return;
+    document.body.classList.toggle('service-open');
+    markService();
+  }
+  function closeService() {
+    document.body.classList.remove('service-open');
+  }
+
+  function afterShow(n, fromRemote) {
+    updateNotes();
+    markService();
+    tick();
+    if (!fromRemote) {
+      post({ type: 'show', n: n, node: nodeIndex(playOrder[n].slide), black: blacked });
+    }
+  }
 
   function mulberry32(seed) {
     let a = seed >>> 0;
@@ -603,13 +1018,19 @@
 
   function armTimer(slide) {
     clearTimeout(advanceTimer);
-    if (!deck.autoAdvance) return;
+    const spec = sectionSpec(current);
+    const cycle = spec && spec.cycle;
+    if (!deck.autoAdvance && !cycle) return;
     if (slide.dataset.kind === 'video') return;
+    if (cycle) {
+      advanceTimer = setTimeout(autoNext, cycle);
+      return;
+    }
     if (!deck.loop && current >= playOrder.length - 1) return;
-    advanceTimer = setTimeout(nextSlide, deck.autoAdvance);
+    advanceTimer = setTimeout(autoNext, deck.autoAdvance);
   }
 
-  function showSlide(n) {
+  function showSlide(n, fromRemote) {
     if (!playOrder.length) return;
     document.querySelectorAll('.slide').forEach(s => {
       s.classList.remove('active');
@@ -643,7 +1064,7 @@
         advanceTimer = setTimeout(() => {
           if (!playOrder[current] || playOrder[current].slide !== slide) return;
           if (fit.readyState >= 2) return;
-          nextSlide();
+          autoNext();
         }, 1500);
         fit.addEventListener('loadeddata', () => {
           if (playOrder[current] && playOrder[current].slide === slide) clearTimeout(advanceTimer);
@@ -656,13 +1077,18 @@
         fit.play().catch(() => {});
       }
     }
+    afterShow(n, fromRemote);
   }
 
+  // From black, the first Next or Back only restores the picture, as in
+  // PowerPoint, so a clicker never skips a slide the room has not seen.
   function nextSlide() {
+    if (blacked) { setBlack(false); return; }
     if (current < playOrder.length - 1) showSlide(current + 1);
     else if (deck.loop && playOrder.length) showSlide(0);
   }
   function prevSlide() {
+    if (blacked) { setBlack(false); return; }
     if (current > 0) showSlide(current - 1);
     else if (deck.loop && playOrder.length) showSlide(playOrder.length - 1);
   }
@@ -679,13 +1105,13 @@
     const fill = slide.querySelector('video.video-fill');
     if (!fit) return;
     fit.addEventListener('ended', () => {
-      if (playOrder[current] && playOrder[current].slide === slide) nextSlide();
+      if (playOrder[current] && playOrder[current].slide === slide) autoNext();
     });
     fit.addEventListener('error', () => {
       if (!playOrder[current] || playOrder[current].slide !== slide) return;
       clearTimeout(advanceTimer);
       advanceTimer = setTimeout(() => {
-        if (playOrder[current] && playOrder[current].slide === slide) nextSlide();
+        if (playOrder[current] && playOrder[current].slide === slide) autoNext();
       }, 1000);
     });
     const canvas = slide.querySelector('canvas.video-fill');
@@ -726,12 +1152,45 @@
     fit.addEventListener('loadeddata', paint);
   });
 
+  // Presentation clickers send PageDown/PageUp (some send B or . for blank),
+  // the same keys PowerPoint and Proclaim answer to. A number then Enter
+  // jumps to that slide.
+  let typed = '';
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); nextSlide(); }
-    if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prevSlide(); }
-    if (e.key === 'f' || e.key === 'F') toggleFullscreen();
-    if (e.key === 'Home') showSlide(0);
-    if (e.key === 'End') showSlide(playOrder.length - 1);
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const k = e.key;
+    if (/^[0-9]$/.test(k)) { typed += k; return; }
+    if (k === 'Enter' && typed) {
+      const n = parseInt(typed, 10) - 1;
+      typed = '';
+      e.preventDefault();
+      if (n >= 0 && n < playOrder.length) showSlide(n);
+      return;
+    }
+    typed = '';
+    if (k === 'ArrowRight' || k === 'ArrowDown' || k === 'PageDown' || k === ' ' || k === 'Enter' || k === 'n' || k === 'N') {
+      e.preventDefault();
+      nextSlide();
+    } else if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp' || k === 'Backspace' || k === 'p' || k === 'P') {
+      e.preventDefault();
+      prevSlide();
+    } else if (k === 'Home') {
+      e.preventDefault();
+      showSlide(0);
+    } else if (k === 'End') {
+      e.preventDefault();
+      showSlide(playOrder.length - 1);
+    } else if (k === 'b' || k === 'B' || k === '.') {
+      e.preventDefault();
+      setBlack(!blacked);
+    } else if (k === 's' || k === 'S') {
+      e.preventDefault();
+      toggleService();
+    } else if (k === 'Escape') {
+      closeService();
+    } else if (k === 'f' || k === 'F') {
+      toggleFullscreen();
+    }
     unlock();
   });
 
@@ -755,7 +1214,12 @@
   }
 
   playOrder = buildPlayOrder();
-  showSlide(indexFromHash());
+  buildServicePanel();
+  // The first slide is local: a window that opens late must not pull the
+  // others back. It asks them where they are instead.
+  showSlide(indexFromHash(), true);
+  post({ type: 'hello' });
+  setInterval(tick, 250);
   window.addEventListener('hashchange', () => {
     const n = indexFromHash();
     if (n !== current) showSlide(n);

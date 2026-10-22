@@ -1,0 +1,32 @@
+#!/usr/bin/env perl
+# Stand-in for the SWORD diatheke tool in tests. It answers with the
+# output format of "diatheke -f plain" for a few known keys.
+use strict;
+use warnings;
+my %arg;
+while (@ARGV) {
+    my $flag = shift @ARGV;
+    $arg{$flag} = shift @ARGV;
+}
+my $module = $arg{'-b'} // '';
+my $key = $arg{'-k'} // '';
+exit 0 if $module eq 'NOPE';
+if ($module eq 'FAIL') {
+    print "fake failure\n";
+    exit 3;
+}
+my %text = (
+    'John 3:16-18' => <<'TXT',
+John 3:16: For God so loved the world, that he gave his only begotten Son, that whosoever believeth in him should not perish, but have everlasting life.
+John 3:17: For God sent not his Son into the world to condemn the world; but that the world through him might be saved.
+John 3:18: He that believeth on him is not condemned: but he that believeth not is condemned already,
+because he hath not believed in the name of the only begotten Son of God.
+TXT
+    'Psalms 23:1' => "Psalms 23:1: \x{b6} The LORD is my shepherd; I shall not want.\n",
+);
+binmode STDOUT, ':encoding(UTF-8)';
+if (exists $text{$key}) {
+    print $text{$key};
+    print "($module)\n";
+}
+exit 0;

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Presenter browser checks</title>
+</head>
+<body>
+<pre id="result">pending</pre>
+<script>
+  // Loaded by t/05-browser.t in headless Chromium. Drives the generated deck
+  // in iframes and writes one JSON line of check results into #result.
+  const deckUrl = new URLSearchParams(location.search).get('deck');
+  const checks = [];
+  const check = (name, ok, got) => checks.push({ name, ok: !!ok, got: got === undefined ? null : String(got) });
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  // Messages between frames cross the browser process, which virtual time
+  // does not wait for, so poll in many small steps instead of one sleep.
+  async function waitFor(cond, tries) {
+    for (let i = 0; i < (tries || 200); i++) {
+      if (cond()) return true;
+      await sleep(20);
+    }
+    return cond();
+  }
+
+  // Frames of one deck sync with each other, so each scenario starts by
+  // removing the frames of the last one unless it asks to keep them.
+  function frame(query, hash, keep) {
+    if (!keep) document.querySelectorAll('iframe').forEach(f => f.remove());
+    return new Promise((resolve) => {
+      const f = document.createElement('iframe');
+      f.style.width = '1280px';
+      f.style.height = '720px';
+      f.onload = () => resolve(f.contentWindow);
+      f.src = deckUrl + (query || '') + (hash || '');
+      document.body.appendChild(f);
+    });
+  }
+  function key(win, k) {
+    win.document.dispatchEvent(new win.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+  }
+  const at = (win) => win.location.hash;
+  const css = (win, el, prop) => el ? win.getComputedStyle(el)[prop] : 'missing';
+
+  async function run() {
+    // Audience view and the keyboard. The clock is set well before the
+    // countdown so the pre-service section stays put.
+    let w = await frame('?now=08:00');
+    await sleep(50);
+    check('audience is the default view', w.document.body.classList.contains('view-audience'), w.document.body.className);
+    check('starts at #1', at(w) === '#1', at(w));
+    key(w, 'PageDown'); check('PageDown -> #2', at(w) === '#2', at(w));
+    key(w, 'ArrowDown'); check('ArrowDown -> #3', at(w) === '#3', at(w));
+    key(w, ' '); check('Space -> #4', at(w) === '#4', at(w));
+    key(w, 'ArrowRight'); check('ArrowRight -> #5', at(w) === '#5', at(w));
+    key(w, 'PageUp'); check('PageUp -> #4', at(w) === '#4', at(w));
+    key(w, 'ArrowUp'); check('ArrowUp -> #3', at(w) === '#3', at(w));
+    key(w, 'ArrowLeft'); check('ArrowLeft -> #2', at(w) === '#2', at(w));
+    key(w, 'End'); check('End -> #8', at(w) === '#8', at(w));
+    key(w, 'Home'); check('Home -> #1', at(w) === '#1', at(w));
+    key(w, '3'); key(w, 'Enter'); check('3 Enter -> #3', at(w) === '#3', at(w));
+    key(w, 'b'); check('B blacks the screen', w.document.body.classList.contains('blacked'));
+    const active = w.document.querySelector('.slide.active');
+    check('black hides the slide', css(w, active, 'visibility') === 'hidden', css(w, active, 'visibility'));
+    key(w, 'PageDown');
+    check('Next from black only restores', !w.document.body.classList.contains('blacked') && at(w) === '#3', at(w));
+    key(w, '.'); check('. blacks too', w.document.body.classList.contains('blacked'));
+    key(w, 'B'); check('B again restores', !w.document.body.classList.contains('blacked'));
+    const notes = w.document.querySelector('.slide .notes');
+    check('notes exist in the deck', !!notes);
+    check('notes hidden in audience view', css(w, notes, 'display') === 'none', css(w, notes, 'display'));
+    check('notes panel hidden in audience view', css(w, w.document.getElementById('notesPanel'), 'display') === 'none');
+    key(w, 's');
+    const panel = w.document.getElementById('servicePanel');
+    check('S opens the service order', w.document.body.classList.contains('service-open') && css(w, panel, 'display') === 'block');
+    const buttons = panel.querySelectorAll('button');
+    check('service order lists every slide', buttons.length === 8, buttons.length);
+    const heads = [...panel.querySelectorAll('h2')].map(h => h.textContent).join('|');
+    check('service order shows sections', heads === 'Pre-service|Worship|Post-service', heads);
+    check('current slide marked', panel.querySelector('button.current') === buttons[2]);
+    buttons[5].click();
+    check('click jumps to #6', at(w) === '#6', at(w));
+    check('click closes the overlay', !w.document.body.classList.contains('service-open'));
+    key(w, 's'); key(w, 'Escape');
+    check('Escape closes the overlay', !w.document.body.classList.contains('service-open'));
+    const labels = [...buttons].map(b => b.querySelector('.label').textContent).join('|');
+    check('service labels use headings', labels === 'Potluck Sunday|Prayer Walk|Welcome|John 3:16-17 (KJV)|John 3:18 (KJV)|Sermon|Potluck Sunday|Prayer Walk', labels);
+
+    // Opening the deck after the countdown time must not jump out of
+    // pre-service: countdownEnd fires only when the count is seen to run out.
+    w = await frame('?now=11:00', '#1');
+    await sleep(600);
+    check('late open stays in pre-service', at(w) === '#1', at(w));
+    check('late open says starting now', w.document.getElementById('countdown').textContent === 'Starting now', w.document.getElementById('countdown').textContent);
+
+    // Countdown overlay on the pre-service section.
+    w = await frame('?now=10:20', '#1');
+    await sleep(400);
+    const cd = w.document.getElementById('countdown');
+    check('countdown shows in pre-service', css(w, cd, 'display') === 'block', css(w, cd, 'display'));
+    check('countdown text', /^Worship begins in (10:00|9:5\d)$/.test(cd.textContent), cd.textContent);
+    key(w, '3'); key(w, 'Enter');
+    await sleep(400);
+    check('countdown gone in worship', css(w, cd, 'display') === 'none', css(w, cd, 'display'));
+
+    // Cycle: pre-service turns over every 8 s and wraps within the section.
+    w = await frame('?now=09:00', '#2');
+    await sleep(8600);
+    check('cycle wraps to the section start', at(w) === '#1', at(w));
+    await sleep(8200);
+    check('cycle keeps going', at(w) === '#2', at(w));
+
+    // countdownEnd: next leaves the loop at zero.
+    w = await frame('?now=10:29:57', '#1');
+    await sleep(4000);
+    check('countdown end moves to worship', at(w) === '#3', at(w));
+
+    // Notes view.
+    w = await frame('?now=08:00&view=notes', '#3');
+    await sleep(400);
+    check('notes view class', w.document.body.classList.contains('view-notes') && w.document.documentElement.classList.contains('view-notes'));
+    const np = w.document.getElementById('notesPanel');
+    check('notes panel visible', css(w, np, 'display') === 'block', css(w, np, 'display'));
+    check('notes for Welcome', /Greet visitors\./.test(np.textContent) && /Mention the potluck\./.test(np.textContent), np.textContent);
+    const sb = w.document.getElementById('statusBar').textContent;
+    check('status bar position', /Slide 3 \/ 8/.test(sb), sb);
+    check('status bar next', /Next: John 3:16-17 \(KJV\)/.test(sb), sb);
+    key(w, 'PageDown');
+    check('no notes message', /No notes/.test(np.textContent), np.textContent);
+    key(w, 'b');
+    check('notes view keeps the slide when black', css(w, w.document.querySelector('.slide.active'), 'visibility') === 'visible');
+    check('black badge in notes view', css(w, w.document.getElementById('blackBadge'), 'display') === 'block');
+    key(w, 'b');
+
+    // Lyrics view: words only, transparent page.
+    w = await frame('?now=08:00&view=lyrics', '#3');
+    await sleep(3200);
+    const ls = w.document.querySelector('.slide.active');
+    check('lyrics: transparent body', css(w, w.document.body, 'backgroundColor') === 'rgba(0, 0, 0, 0)', css(w, w.document.body, 'backgroundColor'));
+    check('lyrics: no gradient', css(w, ls.querySelector('.gradient-bottom'), 'display') === 'none');
+    check('lyrics: no bug', css(w, ls.querySelector('.bug'), 'display') === 'none');
+    // Virtual time does not run CSS animations, so check the text is laid
+    // out and visible rather than its fade-in opacity.
+    const lc = ls.querySelector('.content');
+    check('lyrics: text shown', css(w, lc, 'display') !== 'none' && css(w, lc, 'visibility') === 'visible' && /Welcome/.test(lc.textContent), lc.textContent.trim().slice(0, 40));
+    check('lyrics: no chrome', css(w, w.document.querySelector('.controls'), 'display') === 'none');
+
+    // Overlay view: no slide text at all.
+    w = await frame('?now=08:00&view=overlay', '#3');
+    await sleep(200);
+    const os = w.document.querySelector('.slide.active');
+    check('overlay: text hidden', css(w, os.querySelector('.content'), 'display') === 'none');
+    check('overlay: transparent', css(w, w.document.body, 'backgroundColor') === 'rgba(0, 0, 0, 0)');
+
+    // Service view: the list is the page.
+    w = await frame('?now=08:00&view=service', '#4');
+    await sleep(200);
+    const sp = w.document.getElementById('servicePanel');
+    check('service view shows the list', css(w, sp, 'display') === 'block');
+    check('service view hides slides', css(w, w.document.querySelector('.slide.active'), 'display') === 'none');
+    check('service view marks #4', sp.querySelector('button.current') && sp.querySelector('button.current').dataset.index === '3');
+
+    // Bad view name falls back to audience.
+    w = await frame('?now=08:00&view=bogus');
+    check('unknown view -> audience', w.document.body.classList.contains('view-audience'));
+
+    // Two windows of the same deck follow each other.
+    const a = await frame('?now=08:00', '#1');
+    const b = await frame('?view=notes&now=08:00', '', true);
+    await sleep(300);
+    key(b, 'PageDown');
+    await waitFor(() => at(a) === '#2');
+    check('sync: audience follows notes', at(a) === '#2' && at(b) === '#2', at(a) + ' vs ' + at(b));
+    key(a, 'b');
+    await waitFor(() => b.document.body.classList.contains('blacked'));
+    check('sync: black follows', b.document.body.classList.contains('blacked'));
+    key(a, 'b');
+  }
+
+  run().then(() => {
+    document.getElementById('result').textContent = JSON.stringify(checks);
+  }).catch((err) => {
+    checks.push({ name: 'harness error', ok: false, got: String(err && err.stack || err) });
+    document.getElementById('result').textContent = JSON.stringify(checks);
+  });
+</script>
+</body>
+</html>
