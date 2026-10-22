@@ -109,7 +109,7 @@ Pre-service and post-service loops are sections:
 
 Only the audience view makes sound. Windows of the same deck follow each other in one browser (BroadcastChannel), so the projector can show the plain page while the laptop shows `?view=notes` or `?view=service`, and either one drives. A window opened late joins on the current slide and the running timer.
 
-Inside the macOS app the windows do not talk to each other: Swift owns the state and pushes it to each with `presenter.apply({index, black, timerStart})`, and a page asks for changes with `{type: 'request', index, black, timerStart}` (`macos/PresenterApp/Sources/PresenterCore/Bridge.swift`). `index` counts the play order, fillers included. Only the audience window runs timers, cycles and countdowns there.
+Inside the macOS app the windows do not talk to each other: Swift owns the state and pushes it to each with `presenter.apply({index, black, timerStart})`, and a page asks for changes with `{type: 'request', index, black, timerStart}` (`macos/PresenterApp/Sources/PresenterCore/Bridge.swift`). `index` counts the play order, fillers included. Only the audience window runs timers, cycles and countdowns there. Each view starts hidden (audience black, lyrics and overlay transparent) until Swift's first `presenter.apply`, so a reload never flashes slide 1. A deck with no slides shows "This deck has no slides." and still reports `ready` with count 0.
 
 ### Keys
 
@@ -117,8 +117,8 @@ The keys are PowerPoint's and Proclaim's, so presentation clickers work.
 
 - Next: Right, Down, Page Down, Space, Enter, N
 - Back: Left, Up, Page Up, Backspace, P
-- Home, End: first and last slide. A number then Enter jumps to that slide.
-- B or `.`: black screen. The next Next or Back brings the picture back without moving.
+- Home, End: first and last slide. A number then Enter jumps to that slide; digits not followed by Enter within 1.5 seconds are forgotten, so a stray digit never turns a later Enter into a jump.
+- B or `.`: black screen. The next Next or Back brings the picture back without moving. On an auto-advancing deck or a cycling section the show keeps moving underneath the black, so the picture comes back at the live point.
 - S: the service order over the slides; Esc closes it.
 - F: fullscreen.
 
