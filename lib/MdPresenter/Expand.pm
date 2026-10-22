@@ -44,14 +44,17 @@ sub displayName {
     return File::Spec->abs2rel($real, $state->{root});
 }
 
+# $from is "file:line" of the !include that named this file, so cycle and
+# depth errors point at the directive to change.
 sub expandAt {
-    my ($fileReal, $state) = @_;
+    my ($fileReal, $state, $from) = @_;
     my $stack = $state->{stack};
+    my $where = defined $from ? "$from: " : '';
     if (grep { $_ eq $fileReal } @$stack) {
         my @chain = map { displayName($_, $state) } (@$stack, $fileReal);
-        die "Include cycle: " . join(' -> ', @chain) . "\n";
+        die $where . "Include cycle: " . join(' -> ', @chain) . "\n";
     }
-    die "Includes nested deeper than $maxDepth: " . displayName($fileReal, $state) . "\n"
+    die $where . "Includes nested deeper than $maxDepth: " . displayName($fileReal, $state) . "\n"
         if @$stack >= $maxDepth;
 
     open my $fh, '<:encoding(UTF-8)', $fileReal or die "Cannot open " . displayName($fileReal, $state) . ": $!\n";
@@ -69,7 +72,7 @@ sub expandAt {
             my $spec = defined $1 ? $1 : '';
             my $target = eval { resolveInclude($spec, dirname($fileReal), $state->{root}) };
             die "$here:$lineNo: $@" if $@;
-            my $body = expandAt($target, $state);
+            my $body = expandAt($target, $state, "$here:$lineNo");
             $body =~ s/\n+$//;
             push @out, $body;
         } elsif ($line =~ /^\s*!scripture(?:\s+(.*?))?\s*$/) {

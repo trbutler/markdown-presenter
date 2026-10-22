@@ -18,8 +18,8 @@ my %bad = (
     'absolute.md'    => qr/absolute\.md:1: !include path must be relative/,
     'missing-ref.md' => qr/missing-ref\.md:1: !include file not found: missing\.md/,
     'symlink.md'     => qr/symlink\.md:1: !include leaves the deck folder/,
-    'cycle-start.md' => qr/Include cycle: cycle-start\.md -> cycle\/a\.md -> cycle\/b\.md -> cycle\/a\.md/,
-    'self.md'        => qr/Include cycle: self\.md -> self\.md/,
+    'cycle-start.md' => qr/^cycle\/b\.md:2: Include cycle: cycle-start\.md -> cycle\/a\.md -> cycle\/b\.md -> cycle\/a\.md/,
+    'self.md'        => qr/^self\.md:1: Include cycle: self\.md -> self\.md/,
     'empty.md'       => qr/empty\.md:1: !include needs a file name/,
     'dir.md'         => qr/dir\.md:1: !include is not a file: sub/,
 );
