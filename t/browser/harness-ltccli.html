@@ -152,9 +152,10 @@
     check('L: the CCLI notice comes back', shown(w, notice(w)));
 
     // Two windows: audience and the overlay (the NDI feed) follow each other.
-    // Each window runs the slide's own buildIn/buildOut from when it showed
-    // the slide, and a window opened later would be behind; so these checks
-    // use a deck whose own timing is minutes away (lowerthird-manual.md):
+    // Each window runs the slide's own buildIn/buildOut (a late window from
+    // the time in the hello reply), and headless virtual time can still skew
+    // windows a little; so these checks use a deck whose own timing is
+    // minutes away (lowerthird-manual.md):
     // only L moves the lower third, and each step waits for its exact result
     // in the other window before the next key.
     const a = await frame('ltm', '', '#2');
@@ -187,6 +188,82 @@
     key(a, 'PageDown');
     await waitFor(() => at(o) === '#2' && at(late) === '#2');
     check('sync: after leaving and coming back it is down again (own timing)', !ltOn(a) && !ltOn(o) && !ltOn(late));
+
+    // A late window takes the slide's own timing from the hello reply, not
+    // from when it joined: the overlay (NDI) must not keep a lower third up
+    // after the room has lost it.
+    const a2 = await frame('lt', '', '#2');
+    await sleep(1500);
+    const late2 = await frame('lt', '?view=overlay', '', true);
+    const joined2 = await waitFor(() => at(late2) === '#2');
+    // The audience frame's timers can run ahead of this page's virtual clock
+    // (seen: is-on 1.5 s into a 3 s buildIn), so it can be past
+    // buildOut already by the time the late window has joined; then the up
+    // phase cannot be seen, and the out check below still holds both.
+    const isOut = (win) => !!lt(win) && lt(win).classList.contains('is-out');
+    const up2 = await waitFor(() => ltOn(a2) || isOut(a2), 20000);
+    await sleep(50);
+    check('late timing: the audience buildIn brings it up in the late window too', joined2 && up2 && (isOut(a2) ? isOut(late2) : ltOn(a2) && ltOn(late2)), [joined2, up2, ltOn(a2), ltOn(late2), isOut(a2)]);
+    const out2 = await waitFor(() => lt(a2).classList.contains('is-out'), 20000);
+    await sleep(50);
+    check('late timing: the audience buildOut takes it down in the late window too', out2 && !ltOn(a2) && !ltOn(late2) && lt(late2).classList.contains('is-out'), [out2, ltOn(a2), ltOn(late2)]);
+    const late3 = await frame('lt', '?view=overlay', '', true);
+    const joined3 = await waitFor(() => at(late3) === '#2');
+    await sleep(100);
+    check('late timing: the late window joined', joined3, at(late3));
+    check('late timing: a window joining after buildOut starts with it down', !ltOn(late3) && lt(late3).classList.contains('is-out'), lt(late3) && lt(late3).className);
+    key(late3, 'l');
+    const all3 = await waitFor(() => ltOn(a2) && ltOn(late2) && ltOn(late3));
+    check('late timing: L in that window then shows it everywhere', all3, [ltOn(a2), ltOn(late2), ltOn(late3)]);
+
+    // A reply to an older hello must not undo a manual L made since: a lone
+    // window's hello goes unanswered, L is pressed, then a stale automatic
+    // reply (timing long past buildOut) arrives for that hello. The deck's
+    // own timing is minutes away, so only L and the reply can move it.
+    clear();
+    const spy = new BroadcastChannel('mdp:' + new URL(decks.ltm).pathname);
+    let hello = null;
+    spy.onmessage = (e) => { if (e.data && e.data.type === 'hello') hello = e.data.nonce; };
+    const solo = await frame('ltm', '', '#2');
+    const asked = await waitFor(() => hello !== null);
+    key(solo, 'l');
+    check('stale reply: L shows it in a lone window', asked && ltOn(solo), [asked, ltOn(solo)]);
+    // Virtual time does not wait for the channel, so a black message from the
+    // same sender marks when the reply before it has been handled.
+    const handled = async () => {
+      spy.postMessage({ type: 'black', on: true, from: 'spy' });
+      const seen = await waitFor(() => solo.document.body.classList.contains('blacked'));
+      spy.postMessage({ type: 'black', on: false, from: 'spy' });
+      await waitFor(() => !solo.document.body.classList.contains('blacked'));
+      return seen;
+    };
+    spy.postMessage({ type: 'show', reply: true, nonce: hello, n: 1, node: 1, black: false, lowerThird: null, lowerStart: Date.now() - 1000000, from: 'spy' });
+    const done = await handled();
+    check('stale reply: an older automatic reply does not take a newer manual L down', done && ltOn(solo), [done, lt(solo) && lt(solo).className]);
+    spy.close();
+
+    // A late window puts a step the room has already taken in place: no
+    // slide-in replayed after buildIn, and no bar sliding in while it fades
+    // after buildOut (that would show on the overlay, NDI). A lone window's
+    // hello gets a reply whose slide timing started long ago.
+    const joinAt = async (elapsed) => {
+      const spy2 = new BroadcastChannel('mdp:' + new URL(decks.ltm).pathname);
+      let nonce = null;
+      spy2.onmessage = (e) => { if (e.data && e.data.type === 'hello') nonce = e.data.nonce; };
+      const win = await frame('ltm', '?view=overlay', '#2');
+      const got = await waitFor(() => nonce !== null);
+      spy2.postMessage({ type: 'show', reply: true, nonce: nonce, n: 1, node: 1, black: false, lowerThird: null, lowerStart: Date.now() - elapsed, from: 'spy' });
+      spy2.postMessage({ type: 'black', on: true, from: 'spy' });
+      const seen = await waitFor(() => win.document.body.classList.contains('blacked'));
+      spy2.close();
+      const el = lt(win);
+      const cs = el && win.getComputedStyle(el);
+      return { ok: got && seen, el, x: cs && parseFloat(cs.getPropertyValue('--lt-x')), op: cs && parseFloat(cs.opacity) };
+    };
+    let j = await joinAt(600000 + 5000);
+    check('late step: joining after buildIn shows the bar in place, not sliding in', j.ok && j.el.classList.contains('is-on') && !j.el.classList.contains('is-out') && Math.abs(j.x) < 1 && j.op === 1, [j.ok, j.el && j.el.className, j.x, j.op]);
+    j = await joinAt(900000 + 5000);
+    check('late step: joining after buildOut shows no fading bar', j.ok && j.el.classList.contains('is-out') && j.op < 0.01, [j.ok, j.el && j.el.className, j.x, j.op]);
 
     // App views: the slide holds, so the timing rules can be checked.
     w = await nativeFrame('lt', 'overlay');

@@ -777,6 +777,9 @@
   // only while that hello is still pending, however late the reply arrives
   // (a background tab can answer seconds later). Live moves always apply.
   let pendingHello = null;
+  // A manual L (here or from a peer) after this window's hello is newer
+  // than any lower-third state in a reply to it.
+  let lowerSinceHello = false;
   // Inside the app Swift relays instead, so the channel stays closed there.
   let channel = null;
   if (!nativeBridge) {
@@ -814,7 +817,14 @@
         }
         if (typeof msg.black === 'boolean' && msg.black !== blacked) setBlack(msg.black, true);
         if (typeof msg.timerStart === 'number') timerStart = msg.timerStart;
-        if (msg.reply && typeof msg.lowerThird === 'boolean') setLowerThird(msg.lowerThird, true);
+        if (msg.reply && !lowerSinceHello) {
+          if (typeof msg.lowerThird === 'boolean') setLowerThird(msg.lowerThird, true);
+          // Otherwise run the slide's own timing from when the answering window
+          // started it, not from now: a late overlay (NDI) stays in step.
+          else if (typeof msg.lowerStart === 'number' && msg.lowerStart > 0 && currentLowerThird()) {
+            startLowerThird(playOrder[current].slide, Date.now() - msg.lowerStart);
+          }
+        }
         // In step now (the answer, or a newer live move): a slower reply to
         // the same hello must not pull this window back.
         pendingHello = null;
@@ -842,7 +852,7 @@
           post({ type: 'midi-claim', since: midiSince });
           if (midiStatusText) post({ type: 'midi-status', text: midiStatusText });
         }
-        post({ type: 'show', reply: true, nonce: msg.nonce, n: current, node: nodeIndex(playOrder[current] && playOrder[current].slide), black: blacked, timerStart: timerStart, lowerThird: lowerThirdOverride });
+        post({ type: 'show', reply: true, nonce: msg.nonce, n: current, node: nodeIndex(playOrder[current] && playOrder[current].slide), black: blacked, timerStart: timerStart, lowerThird: lowerThirdOverride, lowerStart: lowerStart });
       }
     };
   }
@@ -1335,11 +1345,14 @@
   }
 
   let lowerTimers = [];
+  // When the current slide's own buildIn/buildOut timing started (0: none).
+  let lowerStart = 0;
 
   function clearLowerThird() {
     lowerTimers.forEach(clearTimeout);
     lowerTimers = [];
     lowerThirdOverride = null;
+    lowerStart = 0;
     document.querySelectorAll('.lower-third').forEach(el => {
       el.style.transition = 'none';
       el.classList.remove('is-on', 'is-out');
@@ -1367,6 +1380,7 @@
     lowerTimers.forEach(clearTimeout);
     lowerTimers = [];
     lowerThirdOverride = !!on;
+    lowerSinceHello = true;
     if (on) {
       el.classList.remove('is-out');
       el.classList.add('is-on');
@@ -1380,18 +1394,31 @@
     requestState({ lowerThird: !lowerThirdShowing() });
   }
 
-  function startLowerThird(slide) {
+  // elapsed: how far into its timing the slide already is (a late window).
+  function startLowerThird(slide, elapsed) {
     clearLowerThird();
     const el = slide.querySelector('.lower-third');
     if (!el) return;
-    const buildIn = Number(el.dataset.buildIn);
-    const buildOut = Number(el.dataset.buildOut);
+    const since = Math.max(0, elapsed || 0);
+    lowerStart = Date.now() - since;
+    const buildIn = Number(el.dataset.buildIn) - since;
+    const buildOut = Number(el.dataset.buildOut) - since;
     const stillHere = () => playOrder[current] && playOrder[current].slide === slide;
-    lowerTimers.push(setTimeout(() => {
+    // A late window puts a step the room has already taken in place at once:
+    // replaying its slide-in (or the slide-in plus fade of buildOut) would show
+    // a bar the room no longer has, on the overlay (NDI) too.
+    const already = (...names) => {
+      if (since > 0) el.style.transition = 'none';
+      el.classList.add(...names);
+      if (since > 0) { void el.offsetWidth; el.style.transition = ''; }
+    };
+    if (buildIn <= 0) already('is-on');
+    else lowerTimers.push(setTimeout(() => {
       if (!stillHere()) return;
       el.classList.add('is-on');
     }, buildIn));
-    lowerTimers.push(setTimeout(() => {
+    if (buildOut <= 0) already('is-on', 'is-out');
+    else lowerTimers.push(setTimeout(() => {
       if (!stillHere()) return;
       el.classList.add('is-out');
     }, buildOut));
@@ -1802,6 +1829,7 @@
   }
   if (channel) {
     pendingHello = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    lowerSinceHello = false;
     post({ type: 'hello', nonce: pendingHello });
   }
   midiInit();
