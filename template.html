@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FaithTree Presentation</title>
+<script>
+  // Inside the macOS app (hub 1214) a view waits, hidden, for Swift's first
+  // presenter.apply(), so a reload never flashes slide 1 on a projector or
+  // an overlay feed. Set here, before the body paints.
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.presenter) {
+    document.documentElement.classList.add('native-waiting');
+  }
+</script>
 <style>
   /* Olivette, SIL OFL. Variable faces first in the cascade for browsers
      that understand a weight range; static faces cover the rest. */
@@ -375,6 +383,24 @@
   body.blacked:not(.view-notes):not(.view-service) .countdown {
     visibility: hidden;
   }
+  /* In the app, until the first presenter.apply(): audience black, lyrics
+     and overlay transparent. Notes and service views draw as usual. */
+  html.native-waiting body:not(.view-notes):not(.view-service) .slide,
+  html.native-waiting body:not(.view-notes):not(.view-service) .countdown {
+    visibility: hidden;
+  }
+  /* A deck with no slides says so instead of showing an empty page. */
+  .empty-deck {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font: 600 3vh/1.4 system-ui, sans-serif;
+    text-align: center;
+  }
+  .view-lyrics .empty-deck, .view-overlay .empty-deck { display: none; }
 
   .countdown {
     position: fixed;
@@ -775,6 +801,7 @@
     // Swift has moved the show (often on a clicker key the page never saw),
     // so digits typed before then must not turn a later Enter into a jump.
     typed = '';
+    document.documentElement.classList.remove('native-waiting');
     tick();
   }
 
@@ -1461,7 +1488,17 @@
 
   // The first slide is local: a window that opens late must not pull the
   // others back. It asks them where they are instead.
-  showSlide(indexFromHash(), true);
+  if (!playOrder.length) {
+    // Nothing to show: say so, and still report ready (count 0) below.
+    progress.style.width = '0%';
+    const empty = document.createElement('div');
+    empty.className = 'empty-deck';
+    empty.id = 'emptyDeck';
+    empty.textContent = 'This deck has no slides.';
+    document.body.appendChild(empty);
+  } else {
+    showSlide(indexFromHash(), true);
+  }
   post({ type: 'hello' });
   setTimeout(() => { joining = false; }, 1500);
   if (nativeBridge) {
