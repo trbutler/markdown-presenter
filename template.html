@@ -723,6 +723,10 @@
         if (playOrder[n] && n !== current) showSlide(n, true);
         if (typeof msg.black === 'boolean' && msg.black !== blacked) setBlack(msg.black, true);
         if (typeof msg.timerStart === 'number') timerStart = msg.timerStart;
+        // Once in step (a reply or a live move), later replies to other
+        // windows' hellos must not pull this one back, even if it is only
+        // ever driven from elsewhere.
+        joining = false;
       } else if (msg.type === 'black') {
         setBlack(!!msg.on, true);
       } else if (msg.type === 'timer') {
@@ -1459,6 +1463,7 @@
   // others back. It asks them where they are instead.
   showSlide(indexFromHash(), true);
   post({ type: 'hello' });
+  setTimeout(() => { joining = false; }, 1500);
   if (nativeBridge) {
     nativeBridge.postMessage({
       type: 'ready',
