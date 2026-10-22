@@ -5,14 +5,17 @@ import Foundation
 public struct DeckState: Equatable, Codable, Sendable {
     public var index: Int
     public var black: Bool
+    /// Manual lower-third override for this slide; nil leaves the template default.
+    public var lowerThird: Bool?
     /// Timer origin in milliseconds since 1970, the same unit as JS `Date.now()`.
     public var timerStart: Double
     /// Slide count, learned from the first view's `ready` message.
     public var count: Int
 
-    public init(index: Int = 0, black: Bool = false, timerStart: Double = DeckState.nowMillis(), count: Int = 0) {
+    public init(index: Int = 0, black: Bool = false, timerStart: Double = DeckState.nowMillis(), count: Int = 0, lowerThird: Bool? = nil) {
         self.index = index
         self.black = black
+        self.lowerThird = lowerThird
         self.timerStart = timerStart
         self.count = count
     }
@@ -29,6 +32,7 @@ public enum DeckCommand: Equatable, Sendable {
     case last
     case toggleBlack
     case setBlack(Bool)
+    case setLowerThird(Bool)
     case go(Int)
     case resetTimer(at: Double)
     /// A (re)loaded deck reported its slide count.
@@ -61,6 +65,8 @@ extension DeckState {
             s.black.toggle()
         case .setBlack(let value):
             s.black = value
+        case .setLowerThird(let value):
+            s.lowerThird = value
         case .go(let n):
             if n >= 0 && n < count {
                 s.index = n
@@ -70,6 +76,9 @@ extension DeckState {
         case .setCount(let n):
             s.count = max(0, n)
             s.index = min(s.index, max(0, s.count - 1))
+        }
+        if s.index != index {
+            s.lowerThird = nil
         }
         return s
     }

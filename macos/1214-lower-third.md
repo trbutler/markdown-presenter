@@ -1,0 +1,13 @@
+# Hub 1214 native lower-third relay
+
+The lower-third template follow-up (review/indclaude-1213-lowerthird-ccli, abf728c) handles L in JavaScript. In the app it posts `{type: 'request', lowerThird: true}` or `false`. The native key map does not consume L, so the existing page handler owns that key.
+
+BridgeMessage accepts only real booleans for lowerThird. WKScriptMessage booleans are NSNumber objects backed by CFBoolean, so the parser checks that type identity. Numeric NSNumber 0/1, numeric Swift values, strings, null and other payload shapes do not become an override. A present malformed lowerThird rejects the complete request; an omitted field leaves the existing override alone. This changes only lowerThird validation, preserving the pre-existing parser contract for other fields.
+
+DeckState.lowerThird is Bool?: nil leaves the template's per-slide default in control, true forces it visible, and false forces it hidden. setLowerThird sets a manual override without changing index, blackout or timer. Any actual native index change clears the override to nil, including next/previous, first/last, go and a count update that clamps the index. Commands that leave the index unchanged preserve it, including a repeated go, a boundary key, timer reset, count updates without clamping and blackout changes. Advancing/backing while blacked follows the existing native rule of unblacking without changing index and preserves the override. A compound request applies index first and then its explicit override to the new slide.
+
+Both BridgeScript.apply variants now include lowerThird as true, false or null; nil must not become false, which would hide a template-default lower third on a new slide. The regular and acknowledged apply scripts share one state-object builder. DeckController's existing state comparison and broadcaster therefore propagate manual changes to every registered view and restore them to a reloaded page; acknowledgements remain independent.
+
+Only macos/ is changed. The newer template is not merged into this clone; the base template ignores the extra state field. Integration requires the supervisor's template change, especially its reset-to-default behaviour on a slide change.
+
+PresenterCore tests are authored for strict Bool/CFBoolean validation, NSNumber rejection, compound/missing-field requests, actual-index-change reset, same-slide preservation, true/false/null in both apply paths and Codable compatibility. No Swift compiler or test runner is available here, so neither build nor tests have been run. A VERIFY-ON-MAC comment marks the WKScriptMessage boolean identity check for actual WebKit validation.
