@@ -16,6 +16,9 @@ use MdPresenter::Scripture qw(parseReference);
 # ItemNote: content string.
 # https://api.planningcenteronline.com/docs/apps/services/versions/2018-11-01/vertices/song
 # Song: title.
+# UNVERIFIED Song attributes: author, copyright, ccli_number. These optional
+# fixture fields have not been confirmed by the public-docs review; absent
+# values are omitted. No church licence number is read or emitted.
 # https://api.planningcenteronline.com/docs/apps/services/versions/2018-11-01/vertices/arrangement
 # Arrangement: lyrics string; sequence, sequence_short, sequence_full arrays.
 # UNVERIFIED: lyrics section-label syntax and correspondence to sequence labels;
@@ -96,6 +99,7 @@ for my $item (sort { $a->{attributes}{sequence} <=> $b->{attributes}{sequence} }
         } else {
             push @itemBlocks, placeholder($songTitle, 'Song has no local arrangement lyrics; add lyrics before presenting.');
         }
+        $itemBlocks[0] = songDirective($songTitle, $song ? $song->{attributes} : {}) . "\n\n" . $itemBlocks[0];
     } elsif ($type eq 'media') {
         push @itemBlocks, placeholder($title, 'Media is not imported; add a local media file before presenting.');
     } elsif ($type eq 'item') {
@@ -107,8 +111,10 @@ for my $item (sort { $a->{attributes}{sequence} <=> $b->{attributes}{sequence} }
     @notes = grep { /\S/ } @notes;
     $itemBlocks[0] .= "\n\nNote:\n" . join("\n\n", map { safeText($_) } @notes) . "\n<!-- /notes -->" if @notes;
     push @blocks, @itemBlocks;
+    push @blocks, '// songEnd' if $type eq 'song';
 }
-my $markdown = join("\n\n---\n\n", @blocks) . "\n";
+my $markdown = "// pcoWarning: Add the ccli deck directive with your actual licence number to enable song notices.\n\n"
+    . join("\n\n---\n\n", @blocks) . "\n";
 # Validate/render everything before opening an output file.
 if (defined $output) {
     die "Output must be a local path\n" if $output =~ m{^[a-z][a-z0-9+.-]*:|^//}i;
@@ -187,6 +193,28 @@ sub safeText {
     # escapes HTML itself; entities here would be displayed literally.
     $value =~ s/^(\s*)(?=[!\/#*+\-<]|Notes?:|bg:)/$1 . "\x{200b}"/gme;
     return $value;
+}
+
+# Pipes delimit fields in // song, so use a visible fullwidth pipe in data.
+# Replace source // with fullwidth slashes and neutralise other leading
+# presenter syntax. Single-line validation prevents new directive injection.
+sub songField {
+    my ($value, $name) = @_;
+    return '' unless defined $value && $value ne '';
+    $value = singleLine($value, $name);
+    $value =~ s/\|/\x{ff5c}/g;
+    $value =~ s{//}{\x{ff0f}\x{ff0f}}g;
+    return safeText($value);
+}
+
+sub songDirective {
+    my ($title, $attrs) = @_;
+    my @fields = (songField($title, 'Song title'));
+    push @fields, songField($attrs->{$_}, "Song $_") for qw(author copyright);
+    my $number = songField($attrs->{ccli_number}, 'Song ccli_number');
+    push @fields, length($number) ? 'CCLI Song # ' . $number : '';
+    pop @fields while @fields && $fields[-1] eq '';
+    return '// song: ' . join(' | ', @fields);
 }
 
 sub placeholder {

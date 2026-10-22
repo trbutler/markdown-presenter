@@ -10,6 +10,8 @@ use IPC::Open3;
 use Symbol qw(gensym);
 use Encode qw(decode);
 
+binmode Test::More->builder->$_, ':encoding(UTF-8)' for qw(output failure_output todo_output);
+
 my $root = "$FindBin::Bin/..";
 make_path("$root/build/tmp");
 my $temp = tempdir('pco-XXXXXX', DIR => "$root/build/tmp", CLEANUP => 0);
@@ -44,10 +46,10 @@ sub changedFixture {
 my ($rc, $md, $err) = runImport('--fixture', $fixture);
 is($rc, 0, 'local fixture imported');
 is($err, '', 'no warnings on valid input');
-like($md, qr{\A// section: Gathering\n// insert: 0\n\n# Gathering}, 'header section and visible heading');
+like($md, qr{\A// pcoWarning: Add the ccli deck directive with your actual licence number to enable song notices\.\n\n// section: Gathering\n// insert: 0\n\n# Gathering}, 'header section and visible heading');
 my @slides = split /\n\n---\n\n/, $md;
 my @headings = $md =~ /^# (.+)$/mg;
-is_deeply(\@headings, ['Gathering', ('Morning Mercy') x 6, 'The Word', 'Mission update', 'Prayer', 'Bells'], 'items sorted by sequence, song repeats preserved');
+is_deeply(\@headings, ['Gathering', ('Morning Mercy') x 6, 'The Word', 'Mission update', 'Prayer', 'Bells', ('Evening Grace') x 3], 'items sorted by sequence, song repeats preserved');
 my @lyrics = map { /# Morning Mercy\n\n([^\n]+)/ ? $1 : () } @slides;
 is_deeply(\@lyrics, ['Morning light upon the hill', 'Grace is new with every dawn', 'Through the streets we bear your peace', 'Grace is new with every dawn', 'We will walk in kindness', 'Grace is new with every dawn'], 'verse/chorus/bridge follow arrangement sequence');
 like($md, qr/!scripture John 3:16-18 \(KJV\)/, 'Scripture-prefixed item title uses default KJV');
@@ -162,5 +164,79 @@ my $missingLyrics = changedFixture(sub { delete $_[0]{included}[1]{attributes}{l
 ($rc, $stdout) = runImport('--fixture', $missingLyrics);
 is($rc, 0, 'song without available lyrics preserved');
 like($stdout, qr/Song has no local arrangement lyrics/, 'missing lyrics require manual completion');
+
+# Song metadata integration: optional fixture fields are not API-confirmed.
+my @songLines = $md =~ m{^(// song: .+)$}mg;
+is_deeply(\@songLines, ['// song: Morning Mercy | Ada Writer & Ben Composer | © 2026 Example Publishing | CCLI Song # 424242', '// song: Evening Grace'], 'one exact song directive per Song item; absent fields omitted');
+unlike($md, qr{^\s*//\s*ccli\s*:}m, 'importer never enables the church licence directive');
+like($md, qr{^// pcoWarning: Add the ccli deck directive with your actual licence number}m, 'operator gets the licence setup reminder');
+is(scalar(() = $md =~ m{^// songEnd$}mg), 2, 'each song has an explicit end boundary');
+
+my $partial = changedFixture(sub {
+    $_[0]{included}[0]{attributes}{author} = undef;
+    $_[0]{included}[0]{attributes}{copyright} = '';
+});
+($rc, $stdout) = runImport('--fixture', $partial);
+is($rc, 0, 'null and empty metadata fields accepted');
+like($stdout, qr{^// song: Morning Mercy \|  \|  \| CCLI Song # 424242$}m, 'missing middle fields retain positions without invented values');
+
+my $hostile = changedFixture(sub {
+    $_[0]{included}[0]{attributes}{title} = '// ccli: 999 | <Song & "Title">';
+    $_[0]{included}[0]{attributes}{author} = '!include missing.md | // songEnd';
+    $_[0]{included}[0]{attributes}{copyright} = '© 2026 | <Publisher>';
+    $_[0]{included}[0]{attributes}{ccli_number} = '42 | // song: Injected';
+});
+my ($hostileRc, $hostileMd) = runImport('--fixture', $hostile);
+is($hostileRc, 0, 'delimiter and presenter syntax in metadata neutralised');
+my ($hostileLine) = $hostileMd =~ m{^(// song: .+)$}m;
+my $hostileExpected = "// song: \x{ff0f}\x{ff0f} ccli: 999 \x{ff5c} <Song & \"Title\"> | \x{200b}!include missing.md \x{ff5c} \x{ff0f}\x{ff0f} songEnd | © 2026 \x{ff5c} <Publisher> | CCLI Song # 42 \x{ff5c} \x{ff0f}\x{ff0f} song: Injected";
+is($hostileLine, $hostileExpected, 'pipes become fullwidth pipes, double slashes become fullwidth slashes, leading syntax stays literal');
+is(scalar(() = $hostileLine =~ /\|/g), 3, 'only the three field delimiters remain ASCII pipes');
+unlike($hostileMd, qr{^\s*(?://\s*ccli\s*:|!include)}m, 'source metadata cannot inject a licence or include directive');
+
+my $multiline = changedFixture(sub { $_[0]{included}[0]{attributes}{author} = "Writer\n// ccli: 999" });
+($rc, $stdout, $err) = runImport('--fixture', $multiline);
+isnt($rc, 0, 'multiline metadata is rejected before it could create a directive');
+is($stdout, '', 'multiline metadata emits no partial deck');
+like($err, qr/Song author must be a nonempty single line/, 'multiline error identifies the field');
+
+sub generateImported {
+    my ($markdown) = @_;
+    my $file = "$temp/roundtrip-" . ++our $roundtripCounter . '.md';
+    open my $fh, '>:encoding(UTF-8)', $file or die $!;
+    print {$fh} $markdown;
+    close $fh or die $!;
+    local $ENV{MDP_DIATHEKE} = "$FindBin::Bin/bin/fake-diatheke";
+    my $err = gensym;
+    my $pid = open3(my $in, my $out, $err, $^X, "$root/generate.pl", $file);
+    close $in;
+    my $html = do { local $/; <$out> } // '';
+    my $stderr = do { local $/; <$err> } // '';
+    waitpid($pid, 0);
+    return ($? >> 8, decode('UTF-8', $html), decode('UTF-8', $stderr));
+}
+
+my ($genRc, $html, $genErr) = generateImported($md);
+is($genRc, 0, 'imported deck generates with no licence configured') or diag $genErr;
+unlike($html, qr/class="ccli-notice"/, 'round trip stays off until operator supplies a licence');
+($genRc, $html, $genErr) = generateImported("// ccli: 12345\n\n" . $md);
+is($genRc, 0, 'import to generator round trip succeeds with a manual licence') or diag $genErr;
+unlike($genErr, qr/Malformed \/\/ song/, 'imported song directives are accepted by the real parser');
+my @generatedSlides = $html =~ /(^ {2,}<div class="slide(?: slide-video)?" data-deck="main".*?^  <\/div>)/msg;
+for my $case (['Morning Mercy', 6, [1, 0, 0, 0, 0, 1]], ['Evening Grace', 3, [1, 0, 1]]) {
+    my ($title, $count, $expected) = @$case;
+    my @songSlides = grep { /<h1>\Q$title\E<\/h1>/ } @generatedSlides;
+    is(scalar @songSlides, $count, "$title keeps every lyric slide");
+    is_deeply([map { scalar(() = /class="ccli-notice"/g) } @songSlides], $expected, "$title notices appear only on first and last slides");
+}
+is(scalar(() = $html =~ /class="ccli-notice"/g), 4, 'no notices leak into scripture or other items');
+like($html, qr{Morning Mercy \| Ada Writer &amp; Ben Composer \| © 2026 Example Publishing \| CCLI Song # 424242<br>CCLI License # 12345}, 'round trip preserves exact metadata and escapes HTML');
+like($html, qr{>Evening Grace<br>CCLI License # 12345</div>}, 'round trip invents no missing metadata');
+
+($genRc, $html, $genErr) = generateImported("// ccli: 12345\n\n" . $hostileMd);
+is($genRc, 0, 'neutralised metadata survives the complete round trip') or diag $genErr;
+unlike($genErr, qr/Malformed \/\/ song|!include file not found/, 'hostile fields neither split song directives nor request includes');
+like($html, qr/&lt;Song &amp; &quot;Title&quot;&gt;/, 'hostile title is HTML-escaped in the notice');
+unlike($html, qr/CCLI License # 999/, 'hostile title cannot override the manually configured licence');
 
 done_testing();
