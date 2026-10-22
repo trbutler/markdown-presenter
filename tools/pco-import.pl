@@ -4,31 +4,47 @@ use warnings;
 use utf8;
 use JSON::PP;
 use Getopt::Long qw(GetOptions);
+use FindBin;
+use lib "$FindBin::Bin/../lib";
+use MdPresenter::Scripture qw(parseReference);
 
-# FIXTURE ONLY. UNVERIFIED against the live Planning Center Services API:
-# Item attributes item_type, sequence, title, description, scripture_reference,
-# translation; relationships song, arrangement, notes; Song title;
-# Arrangement lyrics (labelled plain text), sequence (array of labels or a
-# comma-separated string); ItemNote content; meta.plan.translation.
+# FIXTURE ONLY. Doc-confirmed by the hub 1213 public API review (no live calls):
+# https://api.planningcenteronline.com/docs/apps/services/versions/2018-11-01/vertices/item
+# Item: item_type (song/header/media/item), integer sequence, title, description;
+# relationships/include values: song, arrangement, item_notes.
+# https://api.planningcenteronline.com/docs/apps/services/versions/2018-11-01/vertices/item_note
+# ItemNote: content string.
+# https://api.planningcenteronline.com/docs/apps/services/versions/2018-11-01/vertices/song
+# Song: title.
+# https://api.planningcenteronline.com/docs/apps/services/versions/2018-11-01/vertices/arrangement
+# Arrangement: lyrics string; sequence, sequence_short, sequence_full arrays.
+# UNVERIFIED: lyrics section-label syntax and correspondence to sequence labels;
+# the Verse/Chorus/Bridge convention below is a local fixture assumption.
+# Availability of SongSelect-imported lyrics through the API is also unconfirmed.
+# scripture_reference, translation and meta.plan.translation are not documented
+# API fields and are ignored. Scripture titles are a local naming convention;
+# translation comes only from --translation (default KJV).
 # JSON:API data is an Item array with related resources in included. No links
 # are followed, no credentials are read, and fetching is deliberately absent.
-# Usage: perl tools/pco-import.pl --fixture plan.json [--output service.md]
+# Usage: perl tools/pco-import.pl --fixture plan.json [--output service.md] [--translation KJV]
 # Without --output the complete service is written to stdout. Header items get
 # // section plus a visible heading so that their notes survive generation.
-# Announcements/media remain explicit placeholders: no local paths are guessed.
+# Media remains an explicit placeholder: no local paths are guessed.
 
 binmode STDOUT, ':encoding(UTF-8)';
 binmode STDERR, ':encoding(UTF-8)';
 Getopt::Long::Configure('no_auto_abbrev', 'no_ignore_case');
 my ($fixture, $output, $help);
-GetOptions('fixture=s' => \$fixture, 'output=s' => \$output, 'help' => \$help)
-    or die "Fixture-only importer: fetching is refused. Use --fixture local.json [--output service.md]\n";
+my $translation = 'KJV';
+GetOptions('fixture=s' => \$fixture, 'output=s' => \$output, 'translation=s' => \$translation, 'help' => \$help)
+    or die "Fixture-only importer: fetching is refused. Use --fixture local.json [--output service.md] [--translation KJV]\n";
 if ($help) {
-    print "Usage: perl tools/pco-import.pl --fixture local.json [--output service.md]\nLocal fixtures only; fetching is refused. No credentials are used.\n";
+    print "Usage: perl tools/pco-import.pl --fixture local.json [--output service.md] [--translation KJV]\nLocal fixtures only; fetching is refused. No credentials are used.\n";
     exit 0;
 }
-die "Fixture-only importer: fetching is refused. Use --fixture local.json [--output service.md]\n"
+die "Fixture-only importer: fetching is refused. Use --fixture local.json [--output service.md] [--translation KJV]\n"
     if @ARGV || !defined $fixture || $fixture =~ m{^[a-z][a-z0-9+.-]*:|^//}i;
+$translation = moduleName($translation);
 die "Fixture must be a local regular file\n" unless -f $fixture;
 open my $fh, '<:raw', $fixture or die "Cannot read fixture: $!\n";
 my $raw = do { local $/; <$fh> };
@@ -46,15 +62,6 @@ for my $resource (@$included) {
     fail('duplicate included resource') if exists $resources{$key};
     $resources{$key} = $resource;
 }
-my $defaultTranslation;
-if (exists $plan->{meta}) {
-    fail('meta must be an object') unless ref($plan->{meta}) eq 'HASH';
-    if (exists $plan->{meta}{plan}) {
-        fail('meta.plan must be an object') unless ref($plan->{meta}{plan}) eq 'HASH';
-        $defaultTranslation = $plan->{meta}{plan}{translation};
-    }
-}
-$defaultTranslation = moduleName($defaultTranslation) if defined $defaultTranslation;
 my (@items, %ids, %positions);
 for my $item (@{ $plan->{data} }) {
     validateResource($item);
@@ -73,7 +80,7 @@ for my $item (sort { $a->{attributes}{sequence} <=> $b->{attributes}{sequence} }
     my $title = singleLine($attrs->{title}, 'Item title');
     my @notes;
     push @notes, text($attrs->{description}, 'description') if defined $attrs->{description};
-    for my $note (related($item, 'notes', 'ItemNote', 1)) {
+    for my $note (related($item, 'item_notes', 'ItemNote', 1)) {
         push @notes, text($note->{attributes}{content}, 'ItemNote content');
     }
     my @itemBlocks;
@@ -89,14 +96,11 @@ for my $item (sort { $a->{attributes}{sequence} <=> $b->{attributes}{sequence} }
         } else {
             push @itemBlocks, placeholder($songTitle, 'Song has no local arrangement lyrics; add lyrics before presenting.');
         }
-    } elsif (($type eq 'item' || $type eq 'scripture')
-            && (defined $attrs->{scripture_reference} || $title =~ /^Scripture:\s*(.+)$/i)) {
-        my $reference = singleLine($attrs->{scripture_reference} // $1, 'scripture reference');
-        fail('invalid scripture reference characters') unless $reference =~ /^[\p{L}\d\s:;,().-]+$/;
-        my $translation = defined $attrs->{translation} ? moduleName($attrs->{translation}) : $defaultTranslation;
-        push @itemBlocks, '!scripture ' . $reference . (defined $translation ? " ($translation)" : '');
+    } elsif ($type eq 'media') {
+        push @itemBlocks, placeholder($title, 'Media is not imported; add a local media file before presenting.');
     } elsif ($type eq 'item') {
-        push @itemBlocks, '# ' . safeText($title);
+        my $reference = scriptureReference($title);
+        push @itemBlocks, defined $reference ? "!scripture $reference ($translation)" : '# ' . safeText($title);
     } else {
         push @itemBlocks, placeholder($title, "Unsupported item type '$type'; complete this item manually.");
     }
@@ -138,6 +142,14 @@ sub moduleName {
     $value = singleLine($value, 'translation');
     fail('translation must be a SWORD module name') unless $value =~ /^[A-Za-z0-9_]+$/;
     return $value;
+}
+
+sub scriptureReference {
+    my ($title) = @_;
+    my $prefixed = $title =~ s/^Scripture:\s*//i;
+    my $reference = eval { parseReference($title) };
+    fail('invalid scripture reference in Item title') if $prefixed && !$reference;
+    return $reference ? $reference->{display} : undef;
 }
 
 sub validateResource {
@@ -215,8 +227,8 @@ sub songBlocks {
     fail('Arrangement lyrics contain no lyric slides') unless @order;
     my $sequence = $attrs->{sequence};
     if (defined $sequence) {
-        fail('Arrangement sequence must be an array or comma-separated text') if ref($sequence) && ref($sequence) ne 'ARRAY';
-        my @labels = ref($sequence) ? @$sequence : split /\s*,\s*/, $sequence;
+        fail('Arrangement sequence must be an array') unless ref($sequence) eq 'ARRAY';
+        my @labels = @$sequence;
         if (@labels) {
             @order = map { sectionKey(singleLine($_, 'Arrangement sequence label')) } @labels;
             fail('Arrangement sequence names a missing lyric section') if grep { !exists $sections{$_} } @order;

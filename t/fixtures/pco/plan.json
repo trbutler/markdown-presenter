@@ -1,18 +1,17 @@
 {
-  "meta": {"plan": {"title": "Sunday Worship — October 25, 2026", "translation": "KJV"}},
   "data": [
     {"type":"Item","id":"106","attributes":{"sequence":6,"item_type":"media","title":"Mission update","description":"Video is not supplied in this fixture."}},
     {"type":"Item","id":"101","attributes":{"sequence":1,"item_type":"header","title":"Gathering","description":"Begin at 10:30."}},
-    {"type":"Item","id":"103","attributes":{"sequence":3,"item_type":"item","title":"Scripture: John 3:16-18","description":"Invite the congregation to stand."},"relationships":{"notes":{"data":[{"type":"ItemNote","id":"n2"}]}}},
-    {"type":"Item","id":"102","attributes":{"sequence":2,"item_type":"song","title":"Morning Mercy","description":"Piano introduction, then everyone."},"relationships":{"song":{"data":{"type":"Song","id":"s1"}},"arrangement":{"data":{"type":"Arrangement","id":"a1"}},"notes":{"data":[{"type":"ItemNote","id":"n1"}]}}},
+    {"type":"Item","id":"103","attributes":{"sequence":3,"item_type":"item","title":"Scripture: John 3:16-18","description":"Invite the congregation to stand."},"relationships":{"item_notes":{"data":[{"type":"ItemNote","id":"n2"}]}}},
+    {"type":"Item","id":"102","attributes":{"sequence":2,"item_type":"song","title":"Morning Mercy","description":"Piano introduction, then everyone."},"relationships":{"song":{"data":{"type":"Song","id":"s1"}},"arrangement":{"data":{"type":"Arrangement","id":"a1"}},"item_notes":{"data":[{"type":"ItemNote","id":"n1"}]}}},
     {"type":"Item","id":"104","attributes":{"sequence":4,"item_type":"header","title":"The Word"}},
-    {"type":"Item","id":"105","attributes":{"sequence":5,"item_type":"scripture","title":"Psalm reading","scripture_reference":"Psalm 23:1","translation":"WEB"}},
+    {"type":"Item","id":"105","attributes":{"sequence":5,"item_type":"item","title":"Psalm 23:1"}},
     {"type":"Item","id":"107","attributes":{"sequence":7,"item_type":"item","title":"Prayer","description":"Pray for our neighbours."}},
-    {"type":"Item","id":"108","attributes":{"sequence":8,"item_type":"custom_cue","title":"Bells","description":"Ring three times."}}
+    {"type":"Item","id":"108","attributes":{"sequence":8,"item_type":"item","title":"Bells","description":"Ring three times."}}
   ],
   "included": [
-    {"type":"Song","id":"s1","attributes":{"title":"Morning Mercy","ccli_number":null}},
-    {"type":"Arrangement","id":"a1","attributes":{"name":"Sunday acoustic","lyrics":"Verse 1\nMorning light upon the hill\nMercy meets us, calm and still\n\nVerse 2\nThrough the streets we bear your peace\nLet our songs of hope increase\n\nChorus\nGrace is new with every dawn\nLove will lead us ever on\n\nBridge\nWe will walk in kindness\nWe will serve in joy","sequence":["Verse 1","Chorus","Verse 2","Chorus","Bridge","Chorus"]}},
+    {"type":"Song","id":"s1","attributes":{"title":"Morning Mercy"}},
+    {"type":"Arrangement","id":"a1","attributes":{"lyrics":"Verse 1\nMorning light upon the hill\nMercy meets us, calm and still\n\nVerse 2\nThrough the streets we bear your peace\nLet our songs of hope increase\n\nChorus\nGrace is new with every dawn\nLove will lead us ever on\n\nBridge\nWe will walk in kindness\nWe will serve in joy","sequence":["Verse 1","Chorus","Verse 2","Chorus","Bridge","Chorus"]}},
     {"type":"ItemNote","id":"n1","attributes":{"content":"Worship leader: repeat the final chorus softly.\nLet the last chord ring."}},
     {"type":"ItemNote","id":"n2","attributes":{"content":"Reader: pause after verse 17."}}
   ]
