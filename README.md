@@ -115,7 +115,11 @@ Generated notices use `.ccli-notice` outside the notes `<aside>`. How they show:
 - Lyrics (the OBS source): a stream needs the notice, so it stays readable (white with a shadow) but compact.
 - Overlay: shown whenever no lower third is up, hidden while one is.
 - Notes: plain text under the notes. Service: plain text on that slide's card.
-- A deck without `// ccli:` is unchanged. Planning Center importer integration and usage reporting are follow-ups. Tim still needs to supply the actual licence number, approve first-and-last placement, and decide which streaming licence applies to any streamed service.
+- A deck without `// ccli:` is unchanged. Usage reporting is a follow-up. Tim still needs to supply the actual licence number, approve first-and-last placement, and decide which streaming licence applies to any streamed service.
+
+The local importer runs as `perl tools/pco-import.pl --fixture plan.json --output service.md` (optionally `--translation WEB`; default KJV). It reads no credentials and makes no network calls. Each song item gets one `// song:` line before its lyric slides and a separate `// songEnd` block after them, including songs with missing-lyrics placeholders. Song title comes from the related Song resource, falling back to the item title if that resource is absent. Song `author`, `copyright`, and `ccli_number` are still **UNVERIFIED API fields**: fixture values are used when supplied, and missing values are omitted without invention. Empty middle positions remain empty to preserve the directive's four-field structure.
+
+Within metadata fields, ASCII pipes become fullwidth `｜`, double slashes become `／／`, and leading presenter syntax gets the same neutralisation as imported prose. Multiline fields are rejected before any deck is written. The generator handles HTML escaping. Import output includes an operator reminder but never a `// ccli:` directive; add that directive by hand with the actual licence number to enable notices. The `pcoWarning` reminder follows the importer's existing warning-comment convention; the generator may report it as an unknown directive while omitting it from slide text.
 
 Pre-service and post-service loops are sections:
 
