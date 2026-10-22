@@ -73,6 +73,55 @@ St. Charles, Missouri
 - A ministry of young adults seeking Jesus together
 ```
 
+## Service features
+
+These are for running a Sunday service from the deck. `examples/sunday-service.md` uses all of them.
+
+`!include announcements.md` on its own line pastes that file in place, so one announcements deck can open and close every service. The path is relative to the file that names it and must stay inside the folder of the deck you build: absolute paths, `..`, and symlinks that lead outside are refused, and so is a file that includes itself, directly or around a loop. Picture and video paths inside an included file are still relative to the built page, the same as in the main file.
+
+`!scripture John 3:16-18 (KJV)` on its own line becomes one or more slides of verse text, split between verses at about 330 characters, each with the range and translation as its kicker. Put it in a block of its own. The translation in parentheses is a SWORD module name; `// translation: WEB` changes the default for the lines after it (KJV otherwise). The verses come from `diatheke`, the SWORD command-line tool. If it is not installed, or the module is missing, the build stops and says so; it never writes an empty slide. `MDP_DIATHEKE=/path/to/diatheke` points at a copy that is not on the PATH.
+
+Speaker notes start at a line that begins with `Note:` (or `Notes:`), or at `<!-- notes -->`, and run to the end of the slide, or to `<!-- /notes -->`. They are only shown in the notes view.
+
+Pre-service and post-service loops are sections:
+
+```
+// section: Before the Service
+// insert: 0
+// cycle: 8s
+// countdown: 10:30am Worship begins in
+// countdownEnd: next
+```
+
+`// cycle: 8s` turns the section over every 8 seconds and wraps to its own first slide, until the operator presses Next on its last slide. `// countdown: 10:30` shows "Service begins in 4:32" over the section, counting to that clock time; any words after the time replace "Service begins in". `// countdownEnd: next` moves on to the next section when it reaches zero (`stay`, the default, shows "Starting now"). Opening the deck after the time does not jump; `?now=10:25` on the page address pretends it is 10:25, for rehearsing.
+
+### Views
+
+`?view=` on the page address picks a view. It puts `view-<name>` on `<html>` and `<body>`.
+
+- `audience` (default): the slides.
+- `notes`: the slide small, its notes beside it, the clock, the slide number, the countdown and the next slide's heading.
+- `lyrics`: only the words, on a transparent page, for an OBS browser source.
+- `overlay`: only lower thirds and the countdown, on a transparent page.
+- `service`: the service order, every section and slide heading. Click one to go there.
+
+Only the audience view makes sound. Windows of the same deck follow each other in one browser (BroadcastChannel), so the projector can show the plain page while the laptop shows `?view=notes` or `?view=service`, and either one drives. A window opened late joins on the current slide.
+
+### Keys
+
+The keys are PowerPoint's and Proclaim's, so presentation clickers work.
+
+- Next: Right, Down, Page Down, Space, Enter, N
+- Back: Left, Up, Page Up, Backspace, P
+- Home, End: first and last slide. A number then Enter jumps to that slide.
+- B or `.`: black screen. The next Next or Back brings the picture back without moving.
+- S: the service order over the slides; Esc closes it.
+- F: fullscreen.
+
+### Tests
+
+`prove -l t/` runs the generator tests. `t/05-browser.t` drives a built deck in headless Chromium and is skipped when Chromium is not installed. Tests never call a real `diatheke`; `t/bin/fake-diatheke` stands in.
+
 ## Usage
 
 1. Put your logo as `logo.png` in this directory (or edit the template to point elsewhere).
@@ -97,6 +146,9 @@ One click or keypress after the page opens unlocks sound for the rest of that pa
 - `template.html` — the visual template and the playback script
 - `generate.pl` — the Perl generator
 - `sample.md` — a short example of the syntax
+- `examples/sunday-service.md` — a service deck using includes, scripture, notes, loops and the countdown
+- `lib/MdPresenter/` — the include and scripture code used by `generate.pl`
+- `t/` — tests (`prove -l t/`)
 - `pray-walk.md` — the September 2025 prayer-walk deck
 - `presentation.html` — generated from `sample.md`
 
