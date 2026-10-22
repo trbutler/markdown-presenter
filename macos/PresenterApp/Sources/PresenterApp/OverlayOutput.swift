@@ -40,7 +40,7 @@ final class OverlayOutput {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.contentAspectRatio = NSSize(width: width, height: height)
-        window.contentView = page.webView
+        window.contentView = OverlayPreviewView(webView: page.webView, renderSize: NSSize(width: width, height: height))
     }
 
     var sinkName: String { sink.displayName }
@@ -79,6 +79,8 @@ final class OverlayOutput {
         captureInFlight = true
         let config = WKSnapshotConfiguration()
         config.afterScreenUpdates = false
+        config.rect = page.webView.bounds
+        config.snapshotWidth = NSNumber(value: outputWidth)
         page.webView.takeSnapshot(with: config) { [weak self] image, error in
             let cgImage = image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
             Task { @MainActor in
@@ -98,6 +100,32 @@ final class OverlayOutput {
         if let frame = FrameConverter.bgra(from: image, width: outputWidth, height: outputHeight, format: sink.preferredFormat) {
             sink.send(frame)
         }
+    }
+}
+
+/// Scale the full output viewport into the preview without relaying its size to WebKit.
+@MainActor
+private final class OverlayPreviewView: NSView {
+    private let renderSize: NSSize
+
+    init(webView: WKWebView, renderSize: NSSize) {
+        self.renderSize = renderSize
+        super.init(frame: NSRect(x: 0, y: 0, width: 480, height: 270))
+        // VERIFY-ON-MAC: confirm WKWebView layout/snapshot use these logical bounds
+        // under an NSView bounds transform, including preview resizing and Retina.
+        setBoundsSize(renderSize)
+        webView.autoresizingMask = []
+        webView.frame = NSRect(origin: .zero, size: renderSize)
+        addSubview(webView)
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        setBoundsSize(renderSize)
     }
 }
 
