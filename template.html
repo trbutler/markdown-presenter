@@ -768,6 +768,9 @@
     if (Number.isInteger(s.index) && playOrder[s.index] && s.index !== current) showSlide(s.index, true);
     if (typeof s.black === 'boolean' && s.black !== blacked) setBlack(s.black, true);
     if (typeof s.timerStart === 'number') timerStart = s.timerStart;
+    // Swift has moved the show (often on a clicker key the page never saw),
+    // so digits typed before then must not turn a later Enter into a jump.
+    typed = '';
     tick();
   }
 
@@ -800,7 +803,11 @@
       goTo(current < b ? current + 1 : a);
       return;
     }
-    nextSlide();
+    // A timer moves the show on underneath a black screen, as a cycle
+    // section does, so the room comes back to the live point. Only the
+    // operator's Next or Back un-blacks (nextSlide/prevSlide).
+    if (current < playOrder.length - 1) goTo(current + 1);
+    else if (deck.loop && playOrder.length) goTo(0);
   }
 
   function slideLabel(slide) {
@@ -1366,12 +1373,17 @@
   // before the page sees them; the rest (numbers, Enter, N, P, S...) still
   // land here and go to Swift as requests.
   const nativeKeys = new Set(['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'ArrowLeft', 'ArrowUp', 'PageUp', 'Home', 'End', 'b', 'B', '.']);
+  // Typed digits expire, so a stray number cannot turn a later Enter (a
+  // Next key) into a jump.
+  const typedMs = 1500;
   let typed = '';
+  let typedAt = 0;
   document.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const k = e.key;
     if (nativeBridge && nativeKeys.has(k)) return;
-    if (/^[0-9]$/.test(k)) { typed += k; return; }
+    if (typed && Date.now() - typedAt > typedMs) typed = '';
+    if (/^[0-9]$/.test(k)) { typed += k; typedAt = Date.now(); return; }
     if (k === 'Enter' && typed) {
       const n = parseInt(typed, 10) - 1;
       typed = '';
