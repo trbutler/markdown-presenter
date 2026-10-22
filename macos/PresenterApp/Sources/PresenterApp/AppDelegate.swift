@@ -175,6 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func reloadDeck() {
         windowManager?.reloadAll()
+        overlay?.reload()
     }
 
     @objc private func showAllViews() {
@@ -197,6 +198,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             try output.start()
             overlay = output
         } catch {
+            output.stop()
+            controller.unregister(.overlay)
             NSLog("[PresenterApp] overlay output failed to start: %@", String(describing: error))
         }
     }

@@ -15,6 +15,7 @@ import Glibc
 public enum NDIRuntimeError: Error, CustomStringConvertible {
     case runtimeNotFound(searched: [String])
     case entryPointMissing(path: String)
+    case noUsableRuntime(searched: [String], missingEntryPoints: [String])
     case bindingNotImplemented
 
     public var description: String {
@@ -23,6 +24,8 @@ public enum NDIRuntimeError: Error, CustomStringConvertible {
             return "NDI runtime not found (looked in: \(searched.joined(separator: ", "))). Install it from https://ndi.video"
         case .entryPointMissing(let path):
             return "\(path) has no NDIlib_v5_load symbol"
+        case .noUsableRuntime(let searched, let missing):
+            return "No usable NDI runtime (looked in: \(searched.joined(separator: ", "))); NDIlib_v5_load missing in: \(missing.joined(separator: ", "))"
         case .bindingNotImplemented:
             return "NDI send binding not written yet (needs the NDI SDK headers; see NDIFrameSink)"
         }
@@ -37,11 +40,13 @@ public final class NDIRuntime {
     /// The NDI v6 runtime still exports this entry point.
     public let loadEntryPoint: UnsafeMutableRawPointer
     private let handle: UnsafeMutableRawPointer
+    private let closeHandle: (UnsafeMutableRawPointer) -> Void
 
-    private init(path: String, handle: UnsafeMutableRawPointer, loadEntryPoint: UnsafeMutableRawPointer) {
+    private init(path: String, handle: UnsafeMutableRawPointer, loadEntryPoint: UnsafeMutableRawPointer, closeHandle: @escaping (UnsafeMutableRawPointer) -> Void) {
         self.path = path
         self.handle = handle
         self.loadEntryPoint = loadEntryPoint
+        self.closeHandle = closeHandle
     }
 
     /// Where to look, in order. The runtime-dir variables are the SDK's own
@@ -65,21 +70,35 @@ public final class NDIRuntime {
     }
 
     public static func load(searching paths: [String] = NDIRuntime.candidatePaths()) throws -> NDIRuntime {
+        try load(searching: paths, openLibrary: { dlopen($0, RTLD_NOW | RTLD_LOCAL) },
+                 findEntry: { dlsym($0, "NDIlib_v5_load") }, closeLibrary: { _ = dlclose($0) })
+    }
+
+    // Inject the loader operations so candidate fallback and ownership can be
+    // checked without installing or opening an NDI runtime.
+    static func load(searching paths: [String], openLibrary: (String) -> UnsafeMutableRawPointer?,
+                     findEntry: (UnsafeMutableRawPointer) -> UnsafeMutableRawPointer?,
+                     closeLibrary: @escaping (UnsafeMutableRawPointer) -> Void) throws -> NDIRuntime {
+        var missingEntryPoints: [String] = []
         for path in paths {
-            guard let handle = dlopen(path, RTLD_NOW | RTLD_LOCAL) else {
+            guard let handle = openLibrary(path) else {
                 continue
             }
-            guard let entry = dlsym(handle, "NDIlib_v5_load") else {
-                dlclose(handle)
-                throw NDIRuntimeError.entryPointMissing(path: path)
+            guard let entry = findEntry(handle) else {
+                closeLibrary(handle)
+                missingEntryPoints.append(path)
+                continue
             }
-            return NDIRuntime(path: path, handle: handle, loadEntryPoint: entry)
+            return NDIRuntime(path: path, handle: handle, loadEntryPoint: entry, closeHandle: closeLibrary)
+        }
+        if !missingEntryPoints.isEmpty {
+            throw NDIRuntimeError.noUsableRuntime(searched: paths, missingEntryPoints: missingEntryPoints)
         }
         throw NDIRuntimeError.runtimeNotFound(searched: paths)
     }
 
     deinit {
-        dlclose(handle)
+        closeHandle(handle)
     }
 }
 

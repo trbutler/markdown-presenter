@@ -61,6 +61,34 @@ final class BridgeTests: XCTestCase {
         XCTAssertEqual(m?.commands, [.go(2), .setBlack(false)])
     }
 
+    func testRejectsUnrepresentableAndFractionalIndices() {
+        for value in [1e100, 1.5, Double.infinity, Double.nan] {
+            let message = BridgeMessage(body: ["type": "request", "index": value] as [String: Any])
+            XCTAssertEqual(message?.commands, [])
+            let boxed = BridgeMessage(body: ["type": "request", "index": NSNumber(value: value)] as [String: Any])
+            XCTAssertEqual(boxed?.commands, [])
+            let ready = BridgeMessage(body: ["type": "ready", "count": value] as [String: Any])
+            XCTAssertEqual(ready?.commands, [.setCount(0)])
+        }
+        let valid = BridgeMessage(body: ["type": "request", "index": 2.0] as [String: Any])
+        XCTAssertEqual(valid?.commands, [.go(2)])
+    }
+
+    func testAppliedAcknowledgementDoesNotChangeDeckState() {
+        let message = BridgeMessage(body: ["type": "applied", "token": "push-123"])
+        XCTAssertEqual(message, .applied(token: "push-123"))
+        XCTAssertEqual(message?.commands, [])
+        XCTAssertNil(BridgeMessage(body: ["type": "applied"]))
+        XCTAssertNil(BridgeMessage(body: ["type": "applied", "token": ""]))
+        XCTAssertNil(BridgeMessage(body: ["type": "applied", "token": 123] as [String: Any]))
+    }
+
+    func testAcknowledgedApplyEncodesTokenAsJSONString() {
+        let script = BridgeScript.apply(DeckState(timerStart: 1000), acknowledgement: "quote\"\n")
+        XCTAssertTrue(script.contains("token: \"quote\\\"\\n\""))
+        XCTAssertTrue(script.contains("type: 'applied'"))
+    }
+
     func testRejectsJunk() {
         XCTAssertNil(BridgeMessage(body: "next"))
         XCTAssertNil(BridgeMessage(body: ["type": "launch-missiles"] as [String: Any]))
@@ -98,5 +126,39 @@ final class ScreenAssignmentTests: XCTestCase {
         XCTAssertEqual(a.resolve(.confidence, among: [laptop, projector]), laptop)
         XCTAssertEqual(a.savedDisplayID(for: .confidence), "S")
         XCTAssertEqual(a.resolve(.confidence, among: [laptop, projector, stageTV]), stageTV)
+    }
+}
+
+final class NDIRuntimeTests: XCTestCase {
+    func testMissingEntryPointFallsThroughAndClosesHandles() throws {
+        let oldHandle = try XCTUnwrap(UnsafeMutableRawPointer(bitPattern: 1))
+        let goodHandle = try XCTUnwrap(UnsafeMutableRawPointer(bitPattern: 2))
+        let entry = try XCTUnwrap(UnsafeMutableRawPointer(bitPattern: 3))
+        var attempted: [String] = []
+        var closed: [UnsafeMutableRawPointer] = []
+        var runtime: NDIRuntime? = try NDIRuntime.load(searching: ["absent", "old", "good"], openLibrary: { path in
+            attempted.append(path)
+            return path == "old" ? oldHandle : path == "good" ? goodHandle : nil
+        }, findEntry: { $0 == goodHandle ? entry : nil }, closeLibrary: { closed.append($0) })
+        XCTAssertEqual(attempted, ["absent", "old", "good"])
+        XCTAssertEqual(runtime?.path, "good")
+        XCTAssertEqual(runtime?.loadEntryPoint, entry)
+        XCTAssertEqual(closed, [oldHandle])
+        runtime = nil
+        XCTAssertEqual(closed, [oldHandle, goodHandle])
+    }
+
+    func testAllRejectedCandidatesAreReported() throws {
+        let handle = try XCTUnwrap(UnsafeMutableRawPointer(bitPattern: 1))
+        var closed = 0
+        XCTAssertThrowsError(try NDIRuntime.load(searching: ["old", "absent"], openLibrary: { $0 == "old" ? handle : nil },
+                                               findEntry: { _ in nil }, closeLibrary: { _ in closed += 1 })) { error in
+            guard case NDIRuntimeError.noUsableRuntime(let searched, let missing) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertEqual(searched, ["old", "absent"])
+            XCTAssertEqual(missing, ["old"])
+        }
+        XCTAssertEqual(closed, 1)
     }
 }

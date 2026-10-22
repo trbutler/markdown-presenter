@@ -11,6 +11,8 @@ public enum BridgeMessage: Equatable, Sendable {
     /// A view asked for a change (control-view click, on-screen button).
     /// Swift applies it and pushes the resulting state to every view.
     case request(index: Int?, black: Bool?, timerStart: Double?)
+    /// An apply has reached the page; token identifies the native push being acknowledged.
+    case applied(token: String)
 
     /// `body` is `WKScriptMessage.body`: an NSDictionary of NSString/NSNumber/NSArray.
     public init?(body: Any) {
@@ -21,6 +23,11 @@ public enum BridgeMessage: Equatable, Sendable {
         case "ready":
             let view = (dict["view"] as? String).flatMap(ViewRole.init(rawValue:))
             self = .ready(view: view, count: BridgeMessage.int(dict["count"]) ?? 0, titles: dict["titles"] as? [String] ?? [])
+        case "applied":
+            guard let token = dict["token"] as? String, !token.isEmpty else {
+                return nil
+            }
+            self = .applied(token: token)
         case "request":
             self = .request(index: BridgeMessage.int(dict["index"]), black: dict["black"] as? Bool, timerStart: BridgeMessage.double(dict["timerStart"]))
         default:
@@ -33,6 +40,8 @@ public enum BridgeMessage: Equatable, Sendable {
         switch self {
         case .ready(_, let count, _):
             return [.setCount(count)]
+        case .applied:
+            return []
         case .request(let index, let black, let timerStart):
             var result: [DeckCommand] = []
             if let index = index {
@@ -53,7 +62,7 @@ public enum BridgeMessage: Equatable, Sendable {
             return n
         }
         if let d = value as? Double, d.isFinite {
-            return Int(d)
+            return Int(exactly: d)
         }
         return nil
     }
@@ -91,5 +100,25 @@ public enum BridgeScript {
     /// back, so pushing the same state to all views cannot loop.
     public static func apply(_ state: DeckState) -> String {
         "window.presenter && window.presenter.apply({index: \(state.index), black: \(state.black), timerStart: \(state.timerStart)});"
+    }
+
+    /// Native compatibility shim until the template acknowledges applies itself.
+    /// The page must post {type: 'applied', token: <this push's token>} after
+    /// applying state. Two animation frames let the restored state reach painting.
+    public static func apply(_ state: DeckState, acknowledgement token: String) -> String {
+        guard let data = try? JSONEncoder().encode(token), let tokenJSON = String(data: data, encoding: .utf8) else {
+            return ""
+        }
+        return """
+        (function() {
+            if (!window.presenter || typeof window.presenter.apply !== 'function') return;
+            window.presenter.apply({index: \(state.index), black: \(state.black), timerStart: \(state.timerStart)}, \(tokenJSON));
+            window.requestAnimationFrame(function() {
+                window.requestAnimationFrame(function() {
+                    window.webkit.messageHandlers.presenter.postMessage({type: 'applied', token: \(tokenJSON)});
+                });
+            });
+        })();
+        """
     }
 }

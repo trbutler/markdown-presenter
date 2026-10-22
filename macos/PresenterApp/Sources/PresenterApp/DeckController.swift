@@ -10,13 +10,23 @@ final class DeckController {
     let seed = UInt32.random(in: 0...UInt32.max)
     private(set) var titles: [String] = []
     private var webViews: [ViewRole: WKWebView] = [:]
+    private var appliedHandlers: [ViewRole: @MainActor () -> Void] = [:]
+    private var pendingApplies: [ViewRole: String] = [:]
 
-    func register(_ webView: WKWebView, as role: ViewRole) {
+    func register(_ webView: WKWebView, as role: ViewRole, onApplied: @escaping @MainActor () -> Void) {
         webViews[role] = webView
+        appliedHandlers[role] = onApplied
+        pendingApplies[role] = nil
+    }
+
+    func beginRestoration(for role: ViewRole) {
+        pendingApplies[role] = nil
     }
 
     func unregister(_ role: ViewRole) {
         webViews[role] = nil
+        appliedHandlers[role] = nil
+        pendingApplies[role] = nil
     }
 
     func perform(_ command: DeckCommand) {
@@ -33,6 +43,14 @@ final class DeckController {
     }
 
     func handle(_ message: BridgeMessage, from role: ViewRole) {
+        if case .applied(let token) = message {
+            guard pendingApplies[role] == token else {
+                return
+            }
+            pendingApplies[role] = nil
+            appliedHandlers[role]?()
+            return
+        }
         if case .ready(_, _, let newTitles) = message {
             titles = newTitles
             perform(message.commands)
@@ -50,6 +68,11 @@ final class DeckController {
     }
 
     private func push(to role: ViewRole) {
-        webViews[role]?.evaluateJavaScript(BridgeScript.apply(state), completionHandler: nil)
+        guard let webView = webViews[role] else {
+            return
+        }
+        let token = UUID().uuidString
+        pendingApplies[role] = token
+        webView.evaluateJavaScript(BridgeScript.apply(state, acknowledgement: token), completionHandler: nil)
     }
 }
