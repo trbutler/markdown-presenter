@@ -104,31 +104,6 @@ final class BridgeTests: XCTestCase {
     }
 }
 
-final class ScreenAssignmentTests: XCTestCase {
-    let laptop = DisplayInfo(id: "L", name: "Built-in", isPrimary: true)
-    let projector = DisplayInfo(id: "P", name: "Projector", isPrimary: false)
-    let stageTV = DisplayInfo(id: "S", name: "Stage TV", isPrimary: false)
-
-    func testAutomaticWithOneExternal() {
-        let all = [laptop, projector]
-        XCTAssertEqual(ScreenAssignments.automatic(.audience, among: all), projector)
-        XCTAssertEqual(ScreenAssignments.automatic(.confidence, among: all), laptop)
-        XCTAssertEqual(ScreenAssignments.automatic(.control, among: all), laptop)
-    }
-
-    func testAutomaticWithTwoExternals() {
-        XCTAssertEqual(ScreenAssignments.automatic(.confidence, among: [laptop, projector, stageTV]), stageTV)
-    }
-
-    func testSavedChoiceSurvivesUnplugAndReturns() {
-        var a = ScreenAssignments()
-        a.assign(.confidence, to: "S")
-        XCTAssertEqual(a.resolve(.confidence, among: [laptop, projector]), laptop)
-        XCTAssertEqual(a.savedDisplayID(for: .confidence), "S")
-        XCTAssertEqual(a.resolve(.confidence, among: [laptop, projector, stageTV]), stageTV)
-    }
-}
-
 final class NDIRuntimeTests: XCTestCase {
     func testMissingEntryPointFallsThroughAndClosesHandles() throws {
         let oldHandle = try XCTUnwrap(UnsafeMutableRawPointer(bitPattern: 1))

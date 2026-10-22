@@ -1,198 +1,163 @@
 import AppKit
-import Accelerate
-import WebKit
+import ScreenCaptureKit
+import CoreMedia
+import CoreVideo
 import PresenterCore
 
-/// Renders the deck as `?view=overlay` in its own transparent window and feeds
-/// snapshots to a `FrameSink` (NDI when the binding exists, else the stub).
-///
-/// Capture path (prototype): timer -> WKWebView.takeSnapshot -> CGImage ->
-/// BGRA bytes at the output size -> sink. See the design doc for the
-/// ScreenCaptureKit alternative if snapshots prove too slow.
-@MainActor
-final class OverlayOutput {
-    let outputWidth: Int
-    let outputHeight: Int
-    let framesPerSecond: Double
-    let sourceName: String
+// The filename is retained; output now belongs to any ViewConfig, not an overlay role.
+enum ViewOutputError: Error, LocalizedError {
+    case unavailable(String)
+    var errorDescription: String? {
+        switch self { case .unavailable(let text): return text }
+    }
+}
 
-    private let page: DeckPage
-    private let window: NSWindow
-    private let sink: FrameSink
-    private var timer: Timer?
-    private var captureInFlight: UUID?
-    private var runID: UUID?
-    private(set) var droppedTicks = 0
+/// SDK adapter boundary. Never advertise a discarded-frame stub as a live source.
+private final class NDIGPUFrameSink: FrameSink {
+    let displayName = "NDI"
+    func start(sourceName: String, width: Int, height: Int, framesPerSecond: Double) throws {
+        // VERIFY-ON-MAC/SDK: add the actual vendor GPU/IOSurface or mapped-buffer
+        // binding and release callback; no zero-copy/codec capability is assumed.
+        throw ViewOutputError.unavailable("NDI GPU output requires a verified NDI SDK binding")
+    }
+    func send(_ frame: GPUFrame) {}
+    func stop() {}
+}
 
-    init(deckURL: URL, controller: DeckController, sink: FrameSink, width: Int = 1920, height: Int = 1080, framesPerSecond: Double = 30, sourceName: String = "markdown-presenter overlay") {
-        outputWidth = width
-        outputHeight = height
-        self.framesPerSecond = framesPerSecond
-        self.sourceName = sourceName
-        self.sink = sink
-        page = DeckPage(role: .overlay, deckURL: deckURL, controller: controller)
+private final class CaptureReceiver: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    let queue = DispatchQueue(label: "PresenterApp.ViewCapture")
+    private let converter: FrameConverter
+    private let sink = NDIGPUFrameSink()
+    private var stopped = false
+    private var inFlight = false
+    private let onError: @Sendable (String) -> Void
 
-        // A visible, transparent preview window: the desktop shows through
-        // wherever the overlay is clear. Kept on screen because WebKit may
-        // throttle painting in fully hidden or occluded windows.
-        window = PresenterWindow(contentRect: NSRect(x: 80, y: 80, width: 480, height: 270), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
-        window.title = ViewRole.overlay.title + " preview"
-        window.isReleasedWhenClosed = false
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.contentAspectRatio = NSSize(width: width, height: height)
-        window.contentView = OverlayPreviewView(contentView: page.presentationView, renderSize: NSSize(width: width, height: height))
+    init(width: Int, height: Int, onError: @escaping @Sendable (String) -> Void) throws {
+        self.onError = onError
+        converter = try FrameConverter(width: width, height: height)
+        super.init()
     }
 
-    var sinkName: String { sink.displayName }
-
-    func start() throws {
-        guard runID == nil else {
-            return
-        }
-        try sink.start(sourceName: sourceName, width: outputWidth, height: outputHeight, framesPerSecond: framesPerSecond)
-        runID = UUID()
-        window.orderFront(nil)
-        let timer = Timer(timeInterval: 1 / framesPerSecond, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.tick()
+    static func make(width: Int, height: Int, onError: @escaping @Sendable (String) -> Void) async throws -> CaptureReceiver {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CaptureReceiver, Error>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do { continuation.resume(returning: try CaptureReceiver(width: width, height: height, onError: onError)) }
+                catch { continuation.resume(throwing: error) }
             }
         }
-        // .common keeps frames flowing while a menu is open.
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
     }
 
-    func reload() {
-        page.reload()
+    func start(sourceName: String) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            queue.async { [self] in
+                do {
+                    try sink.start(sourceName: sourceName, width: converter.width, height: converter.height, framesPerSecond: 30)
+                    continuation.resume()
+                } catch {
+                    sink.stop()
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    func stop() {
+        queue.async { [self] in
+            stopped = true
+            sink.stop()
+        }
+    }
+
+    // VERIFY-ON-MAC: SCStream frame attachments/status and stop delegate imports.
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        stop()
+        onError(error.localizedDescription)
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard !stopped, !inFlight, type == .screen, CMSampleBufferIsValid(sampleBuffer),
+              let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+              let status = attachments.first?[.status] as? Int, SCFrameStatus(rawValue: status) == .complete,
+              let image = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        inFlight = true
+        converter.convert(image) { [weak self] frame in
+            self?.queue.async { [weak self] in
+                guard let self = self else { return }
+                self.inFlight = false
+                if !self.stopped, let frame = frame { self.sink.send(frame) }
+            }
+        }
+    }
+}
+
+@MainActor
+final class OverlayOutput {
+    private var stream: SCStream?
+    private var receiver: CaptureReceiver?
+    private var runID: UUID?
+    var onFailure: ((String) -> Void)?
+    var isRunning: Bool { stream != nil && runID != nil }
+
+    func start(window: NSWindow, sourceName: String) async throws {
+        let runID = UUID()
+        self.runID = runID
+        let receiver = try await CaptureReceiver.make(width: 1920, height: 1080) { [weak self] text in
+            Task { @MainActor in
+                guard let self = self, self.runID == runID else { return }
+                self.onFailure?(text)
+                self.stop()
+            }
+        }
+        guard self.runID == runID else { receiver.stop(); return }
+        self.receiver = receiver
+        do {
+            // Binding failure is reported before requesting Screen Recording access.
+            try await receiver.start(sourceName: sourceName)
+            guard self.runID == runID else { receiver.stop(); return }
+            // VERIFY-ON-MAC: confirm ScreenCaptureKit filter, configuration, async
+            // signatures, window-ID mapping, permission UX and single-window alpha.
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            guard self.runID == runID else { receiver.stop(); return }
+            guard let target = content.windows.first(where: { $0.windowID == CGWindowID(window.windowNumber) }) else {
+                throw ViewOutputError.unavailable("Render window is not available to capture")
+            }
+            let filter = SCContentFilter(desktopIndependentWindow: target)
+            let configuration = SCStreamConfiguration()
+            configuration.width = 1920
+            configuration.height = 1080
+            // VERIFY-ON-MAC: sourceRect is in filter coordinates; confirm the
+            // content crop excludes native title chrome at every backing scale.
+            let contentRect = window.contentRect(forFrameRect: window.frame)
+            configuration.sourceRect = CGRect(x: 0, y: window.frame.height - contentRect.height,
+                                               width: contentRect.width, height: contentRect.height)
+            configuration.pixelFormat = kCVPixelFormatType_32BGRA
+            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+            configuration.queueDepth = 3
+            configuration.showsCursor = false
+            configuration.capturesAudio = false
+            configuration.backgroundColor = NSColor.clear.cgColor
+            let stream = SCStream(filter: filter, configuration: configuration, delegate: receiver)
+            try stream.addStreamOutput(receiver, type: .screen, sampleHandlerQueue: receiver.queue)
+            try await stream.startCapture()
+            guard self.runID == runID else {
+                try? await stream.stopCapture()
+                receiver.stop()
+                return
+            }
+            self.stream = stream
+        } catch {
+            receiver.stop()
+            if self.runID == runID { self.receiver = nil; self.runID = nil }
+            throw error
+        }
     }
 
     func stop() {
         runID = nil
-        captureInFlight = nil
-        timer?.invalidate()
-        timer = nil
-        sink.stop()
-        window.orderOut(nil)
-    }
-
-    private func tick() {
-        guard let runID = runID else {
-            return
-        }
-        guard !page.isRestoring else {
-            sendTransparentFrame()
-            return
-        }
-        let restorationID = page.restorationID
-        // Never queue snapshots: if the last one has not returned, drop this
-        // tick. Latency stays bounded at about one frame plus snapshot time.
-        guard captureInFlight != restorationID else {
-            droppedTicks += 1
-            return
-        }
-        captureInFlight = restorationID
-        let config = WKSnapshotConfiguration()
-        config.afterScreenUpdates = false
-        config.rect = page.webView.bounds
-        config.snapshotWidth = NSNumber(value: outputWidth)
-        // VERIFY-ON-MAC: check snapshot callback/NSImage isolation with Swift 5.9 strict checking.
-        page.webView.takeSnapshot(with: config) { [weak self] image, error in
-            let cgImage = image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
-            Task { @MainActor in
-                self?.deliver(cgImage, error: error, runID: runID, restorationID: restorationID)
-            }
-        }
-    }
-
-    private func sendTransparentFrame() {
-        sink.send(VideoFrame(width: outputWidth, height: outputHeight, bytesPerRow: outputWidth * 4,
-                             format: sink.preferredFormat, timestamp: Date().timeIntervalSince1970,
-                             pixels: Data(count: outputWidth * outputHeight * 4)))
-    }
-
-    private func deliver(_ image: CGImage?, error: Error?, runID: UUID, restorationID: UUID) {
-        guard self.runID == runID else {
-            return
-        }
-        if captureInFlight == restorationID {
-            captureInFlight = nil
-        }
-        guard page.restorationID == restorationID, !page.isRestoring else {
-            // An old callback must not overwrite a frame from a restored page.
-            return
-        }
-        guard let image = image else {
-            if let error = error {
-                NSLog("[OverlayOutput] snapshot failed: %@", String(describing: error))
-            }
-            return
-        }
-        if let frame = FrameConverter.bgra(from: image, width: outputWidth, height: outputHeight, format: sink.preferredFormat) {
-            sink.send(frame)
-        }
-    }
-}
-
-/// Scale the full output viewport into the preview without relaying its size to WebKit.
-@MainActor
-private final class OverlayPreviewView: NSView {
-    private let renderSize: NSSize
-
-    init(contentView: NSView, renderSize: NSSize) {
-        self.renderSize = renderSize
-        super.init(frame: NSRect(x: 0, y: 0, width: 480, height: 270))
-        // VERIFY-ON-MAC: confirm WKWebView layout/snapshot use these logical bounds
-        // under an NSView bounds transform, including preview resizing and Retina.
-        setBoundsSize(renderSize)
-        contentView.autoresizingMask = []
-        contentView.frame = NSRect(origin: .zero, size: renderSize)
-        addSubview(contentView)
-    }
-
-    required init?(coder: NSCoder) {
-        return nil
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        setBoundsSize(renderSize)
-    }
-}
-
-enum FrameConverter {
-    /// Draws `image` scaled to width x height into BGRA memory. CGBitmapContext
-    /// only produces premultiplied alpha; straight alpha is derived with vImage.
-    static func bgra(from image: CGImage, width: Int, height: Int, format: PixelFormat) -> VideoFrame? {
-        let bytesPerRow = width * 4
-        var pixels = Data(count: bytesPerRow * height)
-        let drawn = pixels.withUnsafeMutableBytes { (raw: UnsafeMutableRawBufferPointer) -> Bool in
-            guard let base = raw.baseAddress,
-                  let space = CGColorSpace(name: CGColorSpace.sRGB),
-                  let context = CGContext(data: base, width: width, height: height, bitsPerComponent: 8, bytesPerRow: bytesPerRow, space: space,
-                                          bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else {
-                return false
-            }
-            let rect = CGRect(x: 0, y: 0, width: width, height: height)
-            context.clear(rect)
-            context.interpolationQuality = .high
-            context.draw(image, in: rect)
-            if format == .bgra8Straight {
-                // In place: source and destination describe the same memory.
-                var source = vImage_Buffer(data: base, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: bytesPerRow)
-                var destination = source
-                // Alpha is last in both RGBA and BGRA; all colour channels divide alike.
-                // VERIFY-ON-MAC: confirm the RGBA8888 declaration and in-place conversion.
-                let error = vImageUnpremultiplyData_RGBA8888(&source, &destination, vImage_Flags(kvImageNoFlags))
-                guard error == kvImageNoError else {
-                    return false
-                }
-            }
-            return true
-        }
-        guard drawn else {
-            return nil
-        }
-        return VideoFrame(width: width, height: height, bytesPerRow: bytesPerRow, format: format, timestamp: Date().timeIntervalSince1970, pixels: pixels)
+        receiver?.stop()
+        receiver = nil
+        let stream = stream
+        self.stream = nil
+        Task { try? await stream?.stopCapture() }
     }
 }

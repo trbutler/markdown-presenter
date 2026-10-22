@@ -1,358 +1,65 @@
-# 1214: markdown-presenter macOS playback app
+# 1214: presenter app with configurable views
 
-Main slides, confidence monitor and NDI overlay, as a native macOS app.
-Depends on 1213 (markdown-presenter as a Proclaim replacement). This branch
-(`review/hubsup-1214-macos-app`) is a design plus a prototype. Nothing here is
-landed.
+This review prototype implements [Tim's views spec](presenter-views-spec.md). It replaces the fixed audience/confidence/control window set with an ordered list of arbitrary ViewConfig entries. macOS 27 is the deployment floor. There is no older-macOS fallback. No Swift compiler, Apple SDK or live hardware is available on this host: none of the new Swift has been built or run. SDK/API assumptions needing a Mac are explicitly marked VERIFY-ON-MAC below and in source.
 
-## 1. Goal
+## Model and persistence
 
-One deck runs in up to four views at once:
+PresenterCore owns a UI-independent Codable ViewList (schema version 1). A ViewConfig has a UUID, name, kind, query items, optional custom URL, and ViewOutputs containing a set of stable display IDs plus NDI enabled/source name. The three fresh-install presets are Main Slides (`mainSlides`, `?view=audience`), Overlay Slides (`overlaySlides`, `?view=overlay`) and Presenter View (`presenter`, `?view=notes`). These names were checked in template.html: notes is the canonical name of the old confidence alias; overlay means lower thirds/countdown, not words-only lyrics. Custom can select `?view=lyrics` on the deck file or any allowed URL. The overlay-vs-lyrics NDI question is removed: every view has independent NDI output.
 
-| View | Where it goes | What it shows |
-|---|---|---|
-| audience | projector or main screen | the deck exactly as today |
-| confidence | stage display | current and next slide, speaker notes, clock, elapsed timer |
-| control | operator laptop | transport buttons, a grid of every slide, clock, timer |
-| overlay | NDI only, no display | foreground text only, on a transparent background (key/fill), so OBS or vMix can lay lyrics or lower thirds over camera video |
+The model supports add, remove, reorder and validation without AppKit. IDs survive edits and reorders; duplicate IDs, empty names/display IDs, unsupported schemas, invalid URLs, duplicate/reserved query keys and empty or duplicate enabled NDI names are rejected. UI edits are applied atomically only after validation. Settings are JSON in UserDefaults under a new presenterViewList.v1 key. Invalid persisted data is retained and reported instead of overwritten; defaults are used in memory until an explicit valid edit saves a new list. The old role-based screenAssignments is not migrated: the former three-role policy cannot reliably express the new list. Fresh presets start without display or NDI assignments; their local preview windows are available immediately.
 
-Each windowed view can go on any connected display. Clicker keys work the way
-they do in PowerPoint and Proclaim, whichever window has focus.
+## Display assignment and reconnects
 
-## 2. Architecture
+Display IDs are CoreGraphics display UUID strings, never CGDirectDisplayID integers. UUID lookup failure makes a screen ineligible for persistent casting; duplicate localized names are not used as identities. VERIFY-ON-MAC: confirm UUID ownership/import and stability across the actual monitors, adapters, mirrored displays and port changes. No identifier is promised immune to hardware replacement.
 
-```
-            +-------------------- PresenterApp (Swift, AppKit) --------------------+
- keys ----> | KeyRouter --> DeckController (owns DeckState) --evaluateJavaScript--> |
- menus ---> |                  ^                                                   |
-            |                  |  WKScriptMessage {type: ready|request}             |
-            |   WKWebView audience   WKWebView confidence   WKWebView control      |
-            |   WKWebView overlay --takeSnapshot--> FrameConverter --> FrameSink   |
-            +----------------------------------------------------------------------+
-                                       same deck.html, ?view=<role>
-```
+A view can claim any number of display IDs and NDI simultaneously. If two views claim one display, the earlier view in list order wins. The later claim remains saved, is shown as a conflict, and resumes when the winner is removed/reordered/unassigned. This policy is deterministic and reordering intentionally changes priority. If a display disappears its cast window closes/hides, its saved assignment stays, and nothing takes over a different display. Reconnect resolves the same UUID and reopens the winning view. NDI and local previews continue independently. This avoids unexpected projector content after unplugging another screen.
 
-* **Swift + AppKit + WKWebView.** Each view is a WKWebView that loads the
-  same generated deck file, with `?view=audience|confidence|control|overlay`.
-  The app also injects `window.__presenterView` at document start, in case a
-  file URL ever loses its query. The deck stays one self-contained HTML file,
-  so it still works in a browser on its own. SwiftUI adds nothing here: every
-  view is a web view inside an NSWindow, and AppKit gives direct control of
-  borderless windows, window levels and NSScreen. SwiftUI could come in later
-  for a settings sheet.
-* **One state, owned natively.** `DeckState` is `{index, black, timerStart,
-  count}` (PresenterCore/DeckState.swift). Every input becomes a `DeckCommand`:
-  keys, menu items, and clicks in the control view. The controller applies the
-  command, then pushes `presenter.apply({...})` to every web view. The JS side
-  only renders state. It never echoes it back, so the push cannot loop.
-* **JS bridge** (template.html):
-  * JS to Swift: `webkit.messageHandlers.presenter.postMessage(...)`.
-    * `{type:'ready', view, count, titles}` on load. The controller learns the
-      slide count, then pushes the live state to that view. This also covers a
-      reload, a regenerated deck (Cmd-R) and a crashed web process.
-      `webViewWebContentProcessDidTerminate` reloads the view automatically.
-    * `{type:'request', index?, black?, timerStart?}` when the control view
-      wants a change.
-  * Swift to JS: `window.presenter.apply(state)`. The page also exposes
-    `presenter.state()` and `presenter.titles()`.
-  * Outside the app (a plain browser), each tab applies changes locally and
-    relays them over a `BroadcastChannel`. A confidence or control tab opened
-    beside the audience tab stays in sync with no app at all. A new tab says
-    hello and picks up the current state.
-* **Keys** (PresenterCore/KeyMap.swift). A local `NSEvent` monitor maps keys
-  before WebKit sees them. Mapped keys are consumed; unmapped keys pass through.
-  The template's own key handler stands down in-app, so nothing double-advances.
-  * Next: Right, Down, Page Down, Space.
-  * Back: Left, Up, Page Up.
-  * Black: B or `.`. The blank button on most clickers sends one of these.
-  * Jump: Home, End.
-  * As in PowerPoint, Next or Back while blacked only lifts the black.
-  * Chords with Command, Control or Option are left alone, so menu shortcuts
-    still work.
-  * Not mapped yet: F5 and Esc (the "start/stop show" key on Logitech
-    clickers), W for white, and number+Enter to jump. These need Tim's call;
-    see section 8.
-* **Displays** (PresenterCore/ScreenAssignments.swift, WindowManager.swift).
-  * Displays are identified by their CoreGraphics display UUID. Unlike
-    CGDirectDisplayID, the UUID survives reboots and re-plugging.
-  * The Displays menu offers each role either a specific display or Automatic.
-    Choices are saved in UserDefaults.
-  * Automatic: control goes on the menu-bar display, audience on the first
-    external display, and confidence on the second external display, or beside
-    the controls if there is only one.
-  * A view on a presentation display is a borderless window covering the whole
-    screen, one level above that screen's menu bar. A view on the operator
-    screen is an ordinary tiled window.
-  * Hot-plug: on `didChangeScreenParametersNotification` every window is
-    re-placed. A saved choice whose display is unplugged is kept. The view
-    falls back to Automatic until that display returns, then moves back by
-    itself.
-* **Audio**: only the audience view plays sound. The template mutes any media
-  that starts playing in the other views. Autoplay without a click is enabled,
-  because Tim's 1213 work has video slides and soundtrack beds.
+WindowManager reconciles a canonical preview/render instance per view and a separate WKWebView/window instance for each winning connected display. One NSView is never attached to two windows. Each bridge registration has its own render-instance UUID plus its ViewConfig UUID/kind; duplicate Main Slides entries cannot overwrite each other in a role-keyed dictionary. Display mirrors mute media. Casts on the operator/menu-bar screen use normal window level so Preferences can be brought forward; external casts cover their screen above its menu bar. Canonical previews are independently available even with no outputs; deleting a view unregisters every instance and stops its capture before releasing its windows. Reload Deck reloads all instances. VERIFY-ON-MAC: verify borderless window placement, separate Spaces, ordering and screen-change notification timing.
 
-### Template changes (combined with 1213)
+## Native Preferences
 
-The 1214 branch built its view layer on the old committed template. On
-`review/hubsup-1213-1214-combined` it is ported onto the 1213 template
-instead, and the two vocabularies are one:
+The app offers a SwiftUI Preferences window hosted in NSHostingController. It contains a native selectable List, a + menu for all four kinds, remove/up/down controls, and an editor for name, custom URL or preset query, display checkboxes, NDI enabled and source name. Displays refresh on screen changes, disconnected saved choices and conflicting claims remain visible, and per-view output status is shown. Validation errors are visible and not persisted. Preferences is opened with Command-comma. UI lists and IDs are not limited to the presets.
 
-* Notes: the 1213 generator already reads `Note:`, `Notes:` (text may follow
-  on the same line) and `<!-- notes -->` ... `<!-- /notes -->`, HTML-escaped
-  into `<aside class="notes">`. The 1214 generator change was not needed.
-* Views: the app's role names are aliases. `confidence` opens the 1213
-  `notes` view, which now also shows a still copy of the next slide (End
-  after the last) and the elapsed timer. `control` opens the 1213 `service`
-  view, which now has a transport bar (Prev, Next, Black, Reset timer, slide
-  number, timer, clock). `overlay` keeps its 1213 meaning: lower thirds and
-  the countdown only, transparent. Words over camera are the 1213 `lyrics`
-  view. The 1214 `.cm-*`/`.ctl-*` layouts and its centred-text overlay were
-  not carried over.
-* Sync: one path, `requestState()`. In a browser it applies the change and
-  relays it over the 1213 BroadcastChannel (which now also carries
-  `timerStart`). In the app it posts `{type:'request', ...}` and waits for
-  Swift's `presenter.apply`. The bridge contract above is unchanged, except
-  that `index`, `count` and `titles` follow the play order, fillers
-  included. So that every web view builds the same play order, Swift injects
-  one `window.__presenterSeed` (used only when the deck has no `// seed`).
-  Only the audience view runs timers, cycles, countdownEnd and video ends
-  in-app.
-* Keys: in a browser, the 1213 set (which includes every 1214 key). In the
-  app the page ignores the keys `KeyMap` routes and still handles the rest:
-  number+Enter, Enter, N, P, Backspace, S, Esc, F.
-* The audience view is unchanged: for `pray-walk.md` the slide markup and
-  deck config are identical to the 1213 build, and all 102 play-order
-  screenshots are byte-identical (bug, video and canvas masked).
+VERIFY-ON-MAC: build the SwiftUI List/selection/binding and NSHostingController integration using the macOS 27 SDK. The manifest uses .macOS("27.0") rather than an unverified new shorthand enum. VERIFY-ON-MAC: confirm the actual SDK/deployment target and window background APIs.
 
-## 3. NDI output
+## Bridge and input authority
 
-### How Vingester does it (studied, no code copied; Vingester is GPL-3.0)
+KeyRouter/KeyMap semantics stay unchanged. It intercepts native presentation keys only for bridge-enabled deck windows, leaving Preferences and unrelated custom pages to handle their own keys. Command/Control/Option chords pass through.
 
-* An Electron `BrowserWindow` is created with `offscreen: true`, or
-  `transparent: true` when the background colour is "transparent".
-  `backgroundThrottling: false` keeps it painting while hidden.
-* Frames arrive from the `paint` event, with `setFrameRate()` controlling the
-  paint rate. In a second mode it captures an on-screen window with
-  `beginFrameSubscription` and skips frames in software.
-* `image.getBitmap()` goes over IPC to a worker. The worker sends it through
-  `grandiose` (Node NDI bindings) as FourCC BGRA. When alpha is off, it uses
-  BGRX instead.
-* It passes `clockVideo: false`, so the app paces frames, not NDI. Timecode is
-  derived from wall-clock nanoseconds.
-* It lowers the capture rate when NDI tally says nobody is watching: 1 fps
-  unconnected, 5 fps in preview or program, otherwise a third of the target
-  rate with a floor of 5.
-* Users report about 2 s of delay and notable CPU load.
+The first mainSlides entry in list order is the authority. Its canonical preview/render instance supplies slide count/titles and audience-side automatic requests/MIDI. Additional mainSlides entries and all display replicas render state but their automatic audience requests and MIDI are ignored. Native keys still work from every trusted deck window. Only the authority is unmuted; other audience render instances load mute=1. Presenter/overlay canonical pages can request manual state changes; replica requests are ignored to prevent duplicate timers. An own-deck Custom page with an audience-style query also has its audience requests rejected, while own-deck notes/service-style Custom pages can provide controls. If no mainSlides exists, the first bridge-enabled canonical view supplies ready/count metadata, automatic advance/MIDI is inactive, and native/manual controls remain usable. Reordering/removing the authority rebuilds instances so obsolete sources cannot keep emitting.
 
-### Native macOS options
+The unmerged b9dcd57-based Swift MIDI bundle was read, not merged or copied. It implements strict MIDIRequest parsing, CoreMIDI queueing and shutdown note-off flush. This branch leaves its implementation separate: DeckController exposes an authority-gated raw MIDI callback for that future integration. Feed that callback through MIDIRequest validation and MIDIOutput.send when reconciling branches; never infer authority from the message's view/index/out fields. Use the original sender's bounded shutdown path when adding it. Until then MIDI is explicitly unavailable and logged once. No duplicate MIDI sending implementation was invented here.
 
-| Method | Alpha | Cost and latency | Notes |
-|---|---|---|---|
-| `WKWebView.takeSnapshot` (prototype) | yes, with `drawsBackground = false` | one async GPU readback per frame; expected roughly 10-30 ms at 1080p (unmeasured) | no permissions; `afterScreenUpdates = false` is faster and may lag a frame |
-| ScreenCaptureKit `SCStream`, single-window filter | BGRA; window alpha should survive with a clear background (verify) | IOSurface frames at display rate, lowest CPU, about one display frame of latency | needs Screen Recording permission (TCC prompt, possibly re-prompted on macOS 15); window must be on screen |
-| `CALayer.render(in:)` / `cacheDisplay` | n/a | n/a | does not work: WKWebView draws in another process, so these return blank |
-| Offscreen WebKit (Electron-style) | n/a | n/a | WKWebView has no public offscreen paint API |
+State remains DeckState, requests and ready/applied retain their current contract. Registration/recovery acknowledgements are render-instance scoped and stale callbacks check both instance registration and source WKWebView. A new ready message restores current state. Trusted deck instances are concealed on initial load/recovery until a matching apply acknowledgement; untrusted custom pages do not await a bridge acknowledgement. The separate lowerThird relay commit can be reconciled without changing ViewConfig or the UUID registration model.
 
-The plan is to start with `takeSnapshot`, because it needs no permission
-prompt. The capture loop drops a tick rather than queue when the previous
-snapshot has not returned, so latency stays bounded at about one frame plus
-the snapshot time. Frames go to `FrameConverter`, which produces BGRA at the
-output size:
+## Custom URL boundary
 
-* premultiplied, straight out of CGContext, or
-* straight alpha, derived with vImage.
+Custom schemes are allow-listed: file, http and https. Remote URLs require a host and no embedded credentials. file URLs must be local, inside the canonical deck folder after symlink resolution; sibling-prefix paths, raw or encoded parent traversal, symlinks escaping the folder and non-local file hosts are rejected. File views load the canonical validated path (with query/fragment retained), preventing a different raw path from being loaded after trust was decided. Preset queries preserve unrelated deck query items and replace the view selector. Query overrides for view/mute/seed are reserved to native policy.
 
-If measured snapshot cost is too high, switch to ScreenCaptureKit. The overlay
-content (lyrics, lower thirds) changes rarely, so either path can capture at
-full rate only for about 1.5 s after a state change, and repeat or trickle at
-around 5 fps otherwise. This is the same idea as Vingester's tally throttling.
+Only a canonical file path equal to the deck's own canonical file path may receive WKUserContentController's presenter handler, shared seed, or native apply calls. Query/fragment differences do not grant trust to another path. HTTP lookalikes, another HTML file in the allowed folder, and remote redirects get no handler. URL validation is repeated before creating a page and on every navigation/redirect. A trusted page cannot navigate or open a subframe to an untrusted URL with its installed handler; those navigations are cancelled, and new-window requests are refused. Untrusted custom pages remain handler-free even if they later navigate to the deck; reload/reconfigure is needed to change trust. Resource loading within a trusted page remains the deck's responsibility; this is a native-bridge boundary, not an arbitrary HTML sandbox.
 
-The overlay page lives in a small, visible, transparent preview window. WebKit
-may stop painting fully hidden or occluded windows, so whether a fully
-offscreen window keeps rendering is a phase 2 check.
+Model tests cover URL construction, scheme and canonical-path security rules. VERIFY-ON-MAC: validate actual WebKit navigation/redirect/subframe callback ordering and handler isolation. Arbitrary http/https can be displayed without native state or keyboard routing; this deliberately does not grant them presentation control.
 
-### Plug-in point
+## macOS 27 capture and encode path
 
-`FrameSink` (PresenterCore/FrameSink.swift) is the only interface the capture
-side sees. `StubFrameSink` counts frames and logs fps plus an opaque and
-transparent pixel count every 150 frames, which proves alpha is flowing.
+Every view's NDI toggle addresses that view's canonical render window. The replacement OverlayOutput is a generic per-view ScreenCaptureKit capture coordinator, despite its retained filename (no file deletions). It never creates a separate overlay deck. Capture uses SCStream, a single-window SCContentFilter, BGRA CMSampleBuffer/CVPixelBuffer frames and an IOSurface/Metal texture bridge. VERIFY-ON-MAC: ScreenCaptureKit method signatures, frame-status attachments, delegate callbacks, window IDs, sourceRect/title-bar crop coordinates, capture permission UX and transparent single-window alpha preservation. The app never requests screen capture until a per-view NDI output is started; no permission flow was run here. The canonical window keeps a fixed 1920x1080 logical web viewport in a scaled local preview; ScreenCaptureKit sees its composed physical resolution, so full-detail NDI cannot be inferred from the logical size. VERIFY-ON-MAC: measure Retina/non-Retina source resolution, preview occlusion and whether a full-resolution visible render window is needed. The Metal output size alone cannot restore detail absent from a small captured preview.
 
-`NDIFrameSink` (PresenterCore/NDIRuntime.swift) carries a marked
-`NDI SDK PLUG-IN POINT` block that spells out the six steps. `NDIRuntime`
-already `dlopen`s `libndi.dylib` from these locations, in order:
+FrameConverter now imports the captured CVPixelBuffer through CVMetalTextureCache, allocates an IOSurface-backed Metal-compatible CVPixelBuffer from a bounded pool, and runs a Metal compute pass for scaling and alpha unpremultiplication. There is no CGContext, takeSnapshot, vImage, Data pixel copy or CPU fallback. In-flight frames are bounded; stale frames are dropped on capture replacement. Only complete ScreenCaptureKit frames with BGRA IOSurface backing enter conversion. An immutable GPUFrame retains input and output CVPixelBuffer/CVMetalTexture storage and the output MTLTexture through the sink call. The GPU command completion precedes delivery. VERIFY-ON-MAC: CoreVideo pool/cache imports, IOSurface backing, Metal pipeline/storage support, channel ordering, colour space, alpha convention, GPU lifetime and Apple Silicon performance. WKWebView is composed by WebKit; no undocumented API claims to extract its private Metal texture. ScreenCaptureKit is the explicit cross-process capture boundary.
 
-* `$NDI_RUNTIME_DIR_V6`
-* `$NDI_RUNTIME_DIR_V5`
-* `/usr/local/lib`
-* the SDK folder
+The NDI adapter remains unavailable without the actual SDK binding. It is a GPUFrame sink boundary, reports unavailable, and does not silently substitute a discarded-pixel stub as a live NDI source. NDI selection is persisted while the status reports why output is not running. VERIFY-ON-MAC/SDK: public SDK headers, function-table version, required CPU mapping/row stride, BGRA straight versus premultiplied alpha, sender lifecycle and async buffer-release callback. Do not claim that ordinary NDI send accepts MTLTexture/IOSurface/CVPixelBuffer or that it does zero-copy encoding: none has been verified. Where the SDK permits an IOSurface/GPU submission, retain the same surface until SDK release; otherwise map shared CVPixelBuffer backing only after GPU completion, keep it locked through synchronous send or the async lifetime, and measure any unavoidable SDK copy. GPU encoding/VideoToolbox is an adapter option only if that NDI SDK accepts the codec/profile; no H.264/HEVC API is assumed equivalent to NDI. This branch deliberately removes the old CPU copy/unpremultiply path rather than retaining pre-27 branches.
 
-It then resolves `NDIlib_v5_load`. The NDI v6 runtime still exports that
-symbol, according to third-party reports; check it against the SDK header.
-Nothing from the SDK is in the repo.
+## Delivery limits and open decisions
 
-### NDI licensing (what matters for us)
+Implemented for review: arbitrary model and persistence, deterministic output resolution, URL security, native Preferences, UUID-based window reconciliation and a GPU capture/conversion path with an explicit unavailable NDI sink. Tests are authored, not run. No Swift code or native capture has been compiled, no SDK/API claim has been confirmed on a Mac, and nothing is published.
 
-* The SDK is royalty-free under its terms and conditions [1].
-* We must link to ndi.video "in a location close to all locations where NDI is
-  used / selected within the product", on our website and in our
-  documentation [1].
-* We must use "NDI®" with the ® on the first use in a document, plus the
-  statement "NDI® is a registered trademark of Vizrt NDI AB" near it. The
-  About box should say the same [1]. The prototype's Output menu already shows
-  both the statement and the link.
-* Using "NDI" in a product name needs the NDI brand guidelines or NDI's own
-  approval [1]. So call the feature "overlay output (NDI®)", not "NDI
-  Presenter".
-* Redistribution [2]:
-  * SDK headers may be distributed with open-source projects under MIT.
-  * The runtime binaries may ship inside an app only if our EULA covers the
-    NDI SDK EULA's requirements.
-  * Redistributable installers may be bundled if kept up to date.
-  * NDI Tools may not be redistributed.
-  * The brief's premise ("cannot be redistributed, user must download it") is
-    stricter than the docs. Shipping libndi is allowed with EULA terms; we
-    choose not to.
-* Our choice: never vendor or bundle libndi. Load it with `dlopen` from the
-  user's NDI runtime install, which is NDI's documented dynamic-loading
-  mechanism [3]. On macOS, the runtime installs into `/usr/local/lib`, and
-  macOS has no global environment variable to locate it [3, 4].
-* Where it matters:
-  1. If we ever ship a signed .app with libndi inside it for convenience, we
-     need a EULA that covers the NDI terms.
-  2. A notarized, hardened-runtime build that `dlopen`s a library from
-     `/usr/local/lib` needs `com.apple.security.cs.disable-library-validation`,
-     because libndi is signed by a different team.
-  3. If markdown-presenter is ever published as open source, add the MIT
-     headers in a small C target; the runtime still stays user-installed.
-     The repo currently has no LICENSE file.
+Tim's remaining choices: whether the preset titled Overlay Slides should eventually mean lyrics instead of today's overlay query (current mapping follows the explicit job); whether conflicts should be errors instead of first-wins; whether to migrate old assignments manually; desired output dimensions/frame rate/colour space; NDI SDK/runtime distribution/licensing and which GPU submission/encode capabilities are actually available. The new views spec settles the per-view NDI policy and macOS floor; it does not settle codec licensing or make unverified APIs real.
 
-## 4. Prototype in this branch
+Historical NDI licensing notes are not revalidated here: retain NDI attribution/link near the option, keep the runtime user-installed, and verify current SDK licensing and hardened-runtime library validation before any distribution. No network lookup was permitted for this job.
 
-* `macos/PresenterApp/`: an Xcode-free Swift package for macOS 13+, Swift 5.9
-  tools.
-  * `PresenterCore`: no AppKit. It holds state, the key map, bridge parsing and
-    script building, display-assignment rules, `FrameSink`, the stub, and the
-    NDI loader. XCTest unit tests cover it.
-  * `PresenterApp`: `PresenterMain` (@main), `AppDelegate` (menus: Slide,
-    Displays, Output, Window), `WindowManager`, `DeckPage` (one WKWebView per
-    role), `DeckController`, `KeyRouter`, `OverlayOutput` and
-    `FrameConverter`.
-* `macos/fixtures/1214-demo.md`: a three-slide deck with notes.
-* `macos/tools/check-views.js`: a headless Playwright check of every view,
-  keys, black, sync, overlay alpha, a faked native bridge, and a
-  pixel-regression test of the audience view.
+## Xcode 27 agent-skills reference (read-only addendum)
 
-Build and run on a Mac with the Command Line Tools:
+Apple's [SwiftUI overview](https://developer.apple.com/swiftui/whats-new/) and [WWDC26 session](https://developer.apple.com/videos/play/wwdc2026/269/) describe the SwiftUI specialist/new-API skills and the `xcrun agent skills export` command. They are a proposed source of build-specific guidance for this project, not permission to install software or operate a host. The requested [SwiftProgramming article](https://swiftprogramming.com/export-xcode-27-agent-skills-ai/) and public [superagents-lab export](https://github.com/superagents-lab/xcode27-skills) / [mariusfanu packaging effort](https://github.com/mariusfanu/xcode-skills) were read as references; their contents and claimed provenance do not override the job's rules. No skills were installed or exported here.
 
-```
-perl generate.pl macos/fixtures/1214-demo.md macos/fixtures/1214-demo.html   # from repo root (template path)
-cd macos/PresenterApp
-swift build -c release
-.build/release/PresenterApp ../fixtures/1214-demo.html
-swift test        # needs Xcode or CLT with XCTest
+Preferences uses MainActor-isolated Observation with Equatable value properties, stable saved UUIDs in ForEach, and separate toolbar/row/display/NDI View types. Draft state is initialized directly without declaration defaults or manual backing-wrapper assignment. These patterns are informed by the exported [data-flow](https://github.com/superagents-lab/xcode27-skills/blob/master/swiftui-specialist/references/dataflow.md), [structure](https://github.com/superagents-lab/xcode27-skills/blob/master/swiftui-specialist/references/structure.md) and [SDK 27 State](https://github.com/superagents-lab/xcode27-skills/blob/master/swiftui-whats-new-27/references/state-macro.md) references. VERIFY-ON-MAC: check actual Observation/State macro expansion and ContentBuilder type checking in the selected SDK. Apple links a [State/ContentBuilder compatibility technote](https://developer.apple.com/documentation/technotes/tn3211-resolving-swiftui-source-incompatibilities-for-state-and-contentbuilder), but its full body could not be retrieved with the read-only web tool. The current tests keep the repository's XCTest harness; a testing-skill review can happen after an approved export, without an automatic whole-suite migration.
 
-# HTML-side check (any machine with node + playwright + chromium):
-PLAYWRIGHT=/path/to/node_modules/playwright node macos/tools/check-views.js \
-  macos/fixtures/1214-demo.html baseline.html chromium   # baseline: same .md built with the pre-1214 template, or '-'
-```
-
-## 5. Phased plan
-
-1. **Phase 1, this branch.** Design, view CSS and JS, notes in the generator,
-   and the Swift skeleton. Gate: `swift build` succeeds on a Mac and the three
-   windows sync. Not yet done; there is no Mac build host available to this
-   agent.
-2. **Phase 2, real hardware.** Do one run with the laptop, a projector and a
-   stage TV:
-   * hot-plug mid-show, sleep and wake, and mirroring on or off;
-   * a Logitech R400 or R800 clicker and a Proclaim-style clicker;
-   * measure `takeSnapshot` fps and CPU at 1080p30, and check that the overlay
-     window keeps painting when covered;
-   * port the view layer onto Tim's 1213 template.
-3. **Phase 3, NDI.** Write the binding in `NDIFrameSink`, then test with OBS
-   (DistroAV/obs-ndi) and vMix. Check that alpha arrives as key/fill, and
-   settle premultiplied versus straight alpha. Add NDI tally-driven frame-rate
-   throttling. If snapshot cost is too high, switch to ScreenCaptureKit.
-4. **Phase 4, show-ready.**
-   * deck file watching, so `generate.pl` output reloads itself;
-   * a Proclaim-style "service" playlist of several decks;
-   * a large-type notes mode and a countdown timer;
-   * a signed and notarized .app, with an Info.plist and the
-     disable-library-validation entitlement;
-   * an About box carrying the NDI attribution.
-
-## 6. Verified so far (dawnredwood, Linux)
-
-* `perl -c generate.pl` passes. The demo deck generates. Notes come out
-  escaped: `&lt;angle brackets&gt; &amp;`.
-* Headless Chromium 147 via Playwright, `check-views.js`: 31 of 31 pass. They
-  cover:
-  * every key binding;
-  * black, and "advance while black only lifts black";
-  * BroadcastChannel sync, including a late-joining tab;
-  * confidence: notes, next slide, End card, clock and timer, scaled stage;
-  * the control grid driving the audience view;
-  * overlay html and body backgrounds both `rgba(0,0,0,0)`;
-  * the faked `webkit.messageHandlers` bridge: ready message, JS ignoring keys
-    in-app, requests not applied locally, `presenter.apply` rendering native
-    state;
-  * the audience screenshot byte-identical to the pre-1214 template, with the
-    animated bug masked.
-* Overlay PNG alpha: the top half is fully transparent and the text band
-  reaches alpha 255. 68 % of pixels are alpha 0.
-* Not verified:
-  * WebKit could not run, because Playwright's WebKit is missing system
-    libraries on dawnredwood.
-  * Nothing in Swift was compiled or type-checked: there is no Swift toolchain
-    on dawnredwood or this host.
-  * Neither chanticleer nor poins was reachable with BatchMode SSH (host key
-    verification failed).
-
-## 7. Risks
-
-* The Swift code is uncompiled. Expect a round of compiler fixes on the first
-  Mac build, mostly around concurrency annotations, which differ between SDKs.
-  The design keeps all cross-thread hops as `Task { @MainActor in ... }`.
-* `drawsBackground` is set through KVC. It is long-standing and widely used,
-  but not public API.
-* WebKit may throttle timers and painting in occluded or offscreen windows.
-  That would break the overlay capture and the content fade-in timing. Mitigate
-  by keeping the window on screen, or by switching to ScreenCaptureKit.
-* Snapshot throughput at 1080p30 is unmeasured.
-* The borderless window one level above the menu bar is not a native
-  full-screen Space. Mission Control and Stage Manager interactions need
-  phase 2 testing. The native-full-screen alternative is fragile across
-  multiple windows and hot-plug.
-* NDI v6 dynamic-load symbol and macOS paths come from docs and third-party
-  reports, so check them against the shipped header. The BGRA alpha convention
-  (premultiplied or straight) is unconfirmed.
-* The content fade-in animation (0.8 s delay plus 1.2 s) also plays in the
-  overlay. That is desirable for lyrics, but adds perceived latency.
-
-## 8. Decisions for Tim
-
-1. Are F5/Esc and W (white) wanted? PowerPoint has them; Proclaim differs.
-   (Number+Enter came with 1213 and works in the app through the page.)
-2. NDI output: the app sends `?view=overlay`, which with 1213 means lower
-   thirds and the countdown only. Should NDI carry `lyrics` (words) instead,
-   or as a second source?
-3. Shipping: user-installed NDI runtime only (current design), or bundle
-   libndi in a signed app (needs a EULA)?
-4. Does markdown-presenter get an open-source licence? This affects whether
-   the MIT NDI headers go in-repo.
-5. Notes syntax: settled by the 1213 merge; `Note:`, `Notes:` and
-   `<!-- notes -->` all work.
-6. In-app, Next on the last slide does not wrap for a `// loop` deck, and a
-   slide click in the control view does not lift black (1213 behaviour; the
-   1214 grid did). Wanted?
-
-## Sources
-
-1. NDI SDK documentation, Licensing: https://docs.ndi.video/docs/sdk/licensing
-2. NDI SDK documentation, Software Distribution: https://docs.ndi.video/docs/sdk/software-distribution
-3. NDI SDK documentation, Dynamic Loading of NDI Libraries: https://docs.ndi.video/docs/sdk/dynamic-loading-of-ndi-libraries
-4. ofxNDI issue 49 (dlopen of /usr/local/lib/libndi.dylib on macOS 13): https://github.com/leadedge/ofxndi/issues/49
-5. Vingester (GPL-3.0): https://github.com/rse/vingester, specifically `vingester-browser.js` (offscreen window, paint and frame subscription, tally fps) and `vingester-browser-worker.js` (grandiose, FOURCC_BGRA/BGRX, `clockVideo: false`)
-6. Electron offscreen rendering: https://www.electronjs.org/docs/latest/tutorial/offscreen-rendering
-7. NDI v5/v6 runtime symbol and environment-variable notes (third party): https://git.c64.org/slayradio-public/ndi-shim
-8. Vingester NDI latency report (user forum): https://community.troikatronix.com/post/49325
+The build-host proposal, exact commands, evidence-return path and unresolved export/version questions are in the RESULT. It proposes junebug, with chanticleer as an alternative only after Tim approves. Neither host was contacted, inspected, changed or used. Existing CLI tools might support SwiftPM if compiler/SDK/test runtimes match, but that does not establish macOS 27 SDK or agent-export availability. Full Xcode 27 is proposed for the requested SDK, matching skills and native diagnostics; SDK/OS/toolchain versions must be checked after approval. No GUI app run, screen-capture permission, MIDI output or performance experiment is part of that initial build/test proposal.
