@@ -152,9 +152,10 @@
     check('L: the CCLI notice comes back', shown(w, notice(w)));
 
     // Two windows: audience and the overlay (the NDI feed) follow each other.
-    // Each window runs the slide's own buildIn/buildOut from when it showed
-    // the slide, and a window opened later would be behind; so these checks
-    // use a deck whose own timing is minutes away (lowerthird-manual.md):
+    // Each window runs the slide's own buildIn/buildOut (a late window from
+    // the time in the hello reply), and headless virtual time can still skew
+    // windows a little; so these checks use a deck whose own timing is
+    // minutes away (lowerthird-manual.md):
     // only L moves the lower third, and each step waits for its exact result
     // in the other window before the next key.
     const a = await frame('ltm', '', '#2');
@@ -187,6 +188,27 @@
     key(a, 'PageDown');
     await waitFor(() => at(o) === '#2' && at(late) === '#2');
     check('sync: after leaving and coming back it is down again (own timing)', !ltOn(a) && !ltOn(o) && !ltOn(late));
+
+    // A late window takes the slide's own timing from the hello reply, not
+    // from when it joined: the overlay (NDI) must not keep a lower third up
+    // after the room has lost it.
+    const a2 = await frame('lt', '', '#2');
+    await sleep(1500);
+    const late2 = await frame('lt', '?view=overlay', '', true);
+    await waitFor(() => at(late2) === '#2');
+    await waitFor(() => ltOn(a2), 20000);
+    await sleep(50);
+    check('late timing: the audience buildIn brings it up in the late window too', ltOn(a2) && ltOn(late2), [ltOn(a2), ltOn(late2)]);
+    await waitFor(() => lt(a2).classList.contains('is-out'), 20000);
+    await sleep(50);
+    check('late timing: the audience buildOut takes it down in the late window too', !ltOn(a2) && !ltOn(late2) && lt(late2).classList.contains('is-out'), [ltOn(a2), ltOn(late2)]);
+    const late3 = await frame('lt', '?view=overlay', '', true);
+    await waitFor(() => at(late3) === '#2');
+    await sleep(100);
+    check('late timing: a window joining after buildOut starts with it down', !ltOn(late3) && lt(late3).classList.contains('is-out'), lt(late3) && lt(late3).className);
+    key(late3, 'l');
+    await waitFor(() => ltOn(a2));
+    check('late timing: L in that window then shows it everywhere', ltOn(a2) && ltOn(late2) && ltOn(late3), [ltOn(a2), ltOn(late2), ltOn(late3)]);
 
     // App views: the slide holds, so the timing rules can be checked.
     w = await nativeFrame('lt', 'overlay');
