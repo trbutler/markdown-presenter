@@ -17,10 +17,13 @@
   const checks = [];
   const check = (name, ok, got) => checks.push({ name, ok: !!ok, got: got === undefined ? null : String(got) });
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  // Messages between frames cross the browser process, which virtual time
+  // does not wait for: poll in 1 ms steps, so real time can pass for each
+  // step of virtual time (as harness-ltccli.html does).
   async function waitFor(cond, tries) {
-    for (let i = 0; i < (tries || 200); i++) {
+    for (let i = 0; i < (tries || 4000); i++) {
       if (cond()) return true;
-      await sleep(20);
+      await sleep(1);
     }
     return cond();
   }
@@ -122,20 +125,31 @@
     // service, lyrics and overlay never ask for MIDI or send. A second
     // audience window opened later stays quiet.
     const a = await frame('midi', { midi: 'ok', hash: '#1' });
+    // The older window answers a newer claim with its own. Virtual time can
+    // run the newer window's 1.5 s claim window out before that answer
+    // crosses the browser process, so watch the channel and wait for it.
+    const watch = new BroadcastChannel('mdp:' + a.location.pathname);
+    const claims = [];
+    watch.onmessage = (e) => { if (e.data && e.data.type === 'midi-claim') claims.push(e.data.from); };
     await sleep(1700);
     n = await frame('midi', { midi: 'ok', view: 'notes' }, true);
     const sv = await frame('midi', { midi: 'ok', view: 'service' }, true);
     const ly = await frame('midi', { midi: 'ok', view: 'lyrics' }, true);
     const ov = await frame('midi', { midi: 'ok', view: 'overlay' }, true);
+    const seenBefore = claims.length;
     const a2 = await frame('midi', { midi: 'ok' }, true);
+    const answered = await waitFor(() => new Set(claims.slice(seenBefore)).size >= 2, 12000);
+    await waitFor(() => false, 200);
+    watch.close();
+    check('remote: the older audience window answered the newer one\'s claim', answered, JSON.stringify(claims));
     await sleep(1700);
     const a0 = a.__sent.length;
     // Virtual time does not wait for BroadcastChannel, so poll long enough
     // for the move to land rather than one fixed wait.
     key(n, 'PageDown');
-    await waitFor(() => idx(a) === 1 && idx(a2) === 1 && a.__sent.length > a0, 600);
+    await waitFor(() => idx(a) === 1 && idx(a2) === 1 && a.__sent.length > a0, 12000);
     key(n, 'PageDown');
-    await waitFor(() => idx(a) === 2 && idx(a2) === 2 && a.__sent.length > a0 + 1, 600);
+    await waitFor(() => idx(a) === 2 && idx(a2) === 2 && a.__sent.length > a0 + 1, 12000);
     await sleep(100);
     check('remote: audience sends once per change driven from notes', a.__sent.length === a0 + 2 && JSON.stringify(a.__sent.slice(a0).map(s => s.bytes)) === '[[193,9],[177,20,127]]', JSON.stringify(a.__sent.slice(a0).map(s => s.bytes)));
     check('remote: second audience window sends nothing, counted from when it opened', a2.__sent.length === 0, JSON.stringify(a2.__sent.map(s => s.bytes)));
