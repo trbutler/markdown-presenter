@@ -777,6 +777,9 @@
   // only while that hello is still pending, however late the reply arrives
   // (a background tab can answer seconds later). Live moves always apply.
   let pendingHello = null;
+  // A manual L (here or from a peer) after this window's hello is newer
+  // than any lower-third state in a reply to it.
+  let lowerSinceHello = false;
   // Inside the app Swift relays instead, so the channel stays closed there.
   let channel = null;
   if (!nativeBridge) {
@@ -814,11 +817,13 @@
         }
         if (typeof msg.black === 'boolean' && msg.black !== blacked) setBlack(msg.black, true);
         if (typeof msg.timerStart === 'number') timerStart = msg.timerStart;
-        if (msg.reply && typeof msg.lowerThird === 'boolean') setLowerThird(msg.lowerThird, true);
-        // Otherwise run the slide's own timing from when the answering window
-        // started it, not from now: a late overlay (NDI) stays in step.
-        else if (msg.reply && typeof msg.lowerStart === 'number' && msg.lowerStart > 0 && currentLowerThird()) {
-          startLowerThird(playOrder[current].slide, Date.now() - msg.lowerStart);
+        if (msg.reply && !lowerSinceHello) {
+          if (typeof msg.lowerThird === 'boolean') setLowerThird(msg.lowerThird, true);
+          // Otherwise run the slide's own timing from when the answering window
+          // started it, not from now: a late overlay (NDI) stays in step.
+          else if (typeof msg.lowerStart === 'number' && msg.lowerStart > 0 && currentLowerThird()) {
+            startLowerThird(playOrder[current].slide, Date.now() - msg.lowerStart);
+          }
         }
         // In step now (the answer, or a newer live move): a slower reply to
         // the same hello must not pull this window back.
@@ -1375,6 +1380,7 @@
     lowerTimers.forEach(clearTimeout);
     lowerTimers = [];
     lowerThirdOverride = !!on;
+    lowerSinceHello = true;
     if (on) {
       el.classList.remove('is-out');
       el.classList.add('is-on');
@@ -1815,6 +1821,7 @@
   }
   if (channel) {
     pendingHello = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    lowerSinceHello = false;
     post({ type: 'hello', nonce: pendingHello });
   }
   midiInit();
