@@ -38,7 +38,7 @@ Workflow: build the service in Planning Center Services, then run `perl pco-impo
 Mapping, per plan item, in order:
 
 - `header` item: becomes `// section: <title>`.
-- `song` item: the arrangement's lyrics are split into slides on blank lines (or section labels such as `Verse 1`, `Chorus`), in the order of the arrangement `sequence` when it has one. The song title is the kicker. The last slide carries the CCLI notice (see below).
+- `song` item: the arrangement's lyrics are split into slides on blank lines (or section labels such as `Verse 1`, `Chorus`), in the order of the arrangement `sequence` when it has one. The song title is the kicker. The first and last slides can carry the opt-in CCLI notice (see below); importer metadata integration is a follow-up.
 - `item` with a title such as "Scripture: John 3:16-18" becomes `!scripture John 3:16-18`. A plan-level or item-level field chooses the translation.
 - `media` item: becomes `// video:` when a local file of that name exists, otherwise a placeholder slide with a warning.
 - Item description and item notes: become `Note:` blocks.
@@ -62,7 +62,9 @@ Secrets (PCO token):
 
 - I found no public SongSelect API. Secondhand reports say it was partner-only (OAuth with PKCE plus a subscription key) and that CCLI is not taking new partners. Contact: partners@ccli.com (unverified: https://git.stadtmission-butzbach.de/public/pp-planer/src/branch/master/CCLI-API.md). Plan to bring SongSelect lyrics in through Planning Center's own SongSelect integration, not by calling CCLI directly.
 - Licensing when projecting lyrics: the CCLI Church Copyright License covers projecting lyrics in worship. Common practice is to show the song title, writers, copyright line and the church's CCLI licence number once per song, usually on the first or last slide (third-party summary: https://www.musicademy.com/blog/how-to-properly-display-copyright-notices-for-ccli-license-holders/). Get CCLI's own wording before relying on that. Usage reporting goes to CCLI, and for sampled churches this is periodic (https://mediashout.com/?p=313822).
-- Proposed: `// ccli: 1234567` at deck level. A song slide's last page gets a small footer line with the song's copyright line and `CCLI License #1234567`. The importer writes each song's `ccli_number` and copyright line into a directive. A run log, `services/ccli-log.csv`, lists date, song and CCLI number to help with reporting. Automatic reporting is out of scope without CCLI API access.
+- Built in the generator (hub 1213 CCLI branch), OFF by default: `// ccli: <licence number>` enables notices only when an actual numeric number is supplied. `// song: Title | Authors | © year publisher | CCLI Song # number` starts a song run. The generator attaches escaped `.ccli-notice` markup, in a small font, to the first AND last authored slide (once for a one-slide song), with a separate `CCLI License # <number>` line. Empty optional fields are omitted without inventing data. A new song, `// songEnd`, section or filler pool ends the run; metadata-only blocks and includes carry the run forward. Directives inside notes are ignored as metadata. Missing titles, missing colons and extra fields warn with original file:line. Invalid licence directives warn and disable notices.
+- Template positioning/view styling is a follow-up: this branch does not edit `template.html` or `macos/`. Tim should approve the first-and-last choice and supply his licence number. No real licence number is embedded or guessed in the source.
+- Planning Center importer integration is a documented follow-up; the importer is not present in this branch. It should eventually emit the song metadata from verified source fields. A future run log could list date, song and CCLI number for reporting; neither a log nor automatic reporting is implemented here.
 - Livestream (the OBS lyrics view): showing lyrics in a stream needs the separate CCLI Streaming License (https://www.vineyardchurches.org.uk/?p=18464, a UK source; check the US terms).
 
 ### Phase 2: MIDI on slide change (designed, not built)
@@ -85,7 +87,7 @@ Tim's lower third already exists on video slides (`// name`, `// title`, `buildI
 
 1. Planning Center: whether to use it, which service type, and whether to create a Personal Access Token and save it as described above. Also whether the church's arrangements actually hold lyrics (typed in or imported from SongSelect).
 2. Bible translations: the default module (KJV is set now) and whether to use WEB or BSB for modern English. Installing diatheke and modules is a machine change, and nothing was installed for this ticket.
-3. CCLI: the licence number, where the notice goes (first or last slide of each song), and whether services are streamed (Streaming Licence).
+3. CCLI: supply the actual licence number; approve the generator's first-and-last-slide placement and future template styling; decide whether services are streamed and verify the applicable Streaming Licence terms.
 4. MIDI: which device and port (lighting desk, ProPresenter, or a sound board scene recall), which messages, and whether MIDI belongs in the browser or in the 1214 macOS app.
 5. Key choices: Enter as Next (PowerPoint) and Backspace as Back; whether B should also pause the music.
 6. The base snapshot: whether to commit his working tree on `main` first, so that this branch rebases onto it cleanly.

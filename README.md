@@ -83,6 +83,34 @@ These are for running a Sunday service from the deck. `examples/sunday-service.m
 
 Speaker notes start at a line that begins with `Note:` or `Notes:` (text may follow on the same line), or at `<!-- notes -->`, and run to the end of the slide, or to `<!-- /notes -->`. They are HTML-escaped and only shown in the notes view.
 
+Song copyright notices are off by default. To enable them, add `// ccli: <licence number>` at the top of the deck, replacing the placeholder with your actual numeric licence number. Song metadata uses up to four positional fields:
+
+```markdown
+// song: Title | Authors | © year publisher | CCLI Song # number
+
+# First song slide
+
+Lyrics
+
+---
+
+# Last song slide
+
+Lyrics
+
+---
+
+// songEnd
+
+# Prayer
+```
+
+A song starts in the block containing `// song:` (or the next visible block if it contains only directives). It ends before the next `// song:`, `// songEnd`, `// section:`, or filler pool. Use `// songEnd` before unrelated slides in the same section. Included files carry the same song scope, so a song may span `!include` boundaries. A notice appears on the first and last authored slide of each song, once for a single-slide song. Filler slides do not inherit notices.
+
+The notice joins the supplied nonempty fields with ` | `, then adds a separate `CCLI License # <number>` line. Only the title is required; empty optional fields can be kept as `||`, and nothing missing is invented. All notice text is HTML-escaped. Malformed song lines (missing title, missing colon, or more than four fields) warn with the original `file:line`, including inside includes. An invalid licence disables notices and warns. Directives inside speaker notes stay note text and cannot create a notice.
+
+Generated notices use `.ccli-notice` with a small font outside the notes `<aside>`. This change supplies generator markup; final positioning and view styling belong to a later template change. Planning Center importer integration and usage reporting are follow-ups. Tim still needs to supply the actual licence number, approve first-and-last placement, and decide which streaming licence applies to any streamed service.
+
 Pre-service and post-service loops are sections:
 
 ```
