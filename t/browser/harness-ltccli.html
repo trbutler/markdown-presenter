@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Presenter lower-third and CCLI checks</title>
+</head>
+<body>
+<pre id="result">pending</pre>
+<script>
+  // Loaded by t/08-lowerthird-ccli.t in headless Chromium: the CCLI notice
+  // in each view, and the operator's L for lower thirds. Writes one JSON
+  // line of results into #result.
+  const q = new URLSearchParams(location.search);
+  const decks = { ccli: q.get('ccli'), lt: q.get('lt'), ltm: q.get('ltm'), plain: q.get('plain') };
+  const checks = [];
+  const check = (name, ok, got) => checks.push({ name, ok: !!ok, got: got === undefined ? null : String(got) });
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  // Messages between frames cross the browser process, which virtual time
+  // does not wait for: poll in 1 ms steps, so real time can pass for each
+  // step of virtual time.
+  async function waitFor(cond, tries) {
+    for (let i = 0; i < (tries || 3000); i++) {
+      if (cond()) return true;
+      await sleep(1);
+    }
+    return cond();
+  }
+  function clear() { document.querySelectorAll('iframe').forEach(f => f.remove()); }
+  function load(src) {
+    return new Promise((resolve) => {
+      const f = document.createElement('iframe');
+      f.style.width = '1280px';
+      f.style.height = '720px';
+      f.onload = () => resolve(f.contentWindow);
+      f.src = src;
+      document.body.appendChild(f);
+    });
+  }
+  function frame(deck, query, hash, keep) {
+    if (!keep) clear();
+    return load(decks[deck] + (query || '') + (hash || ''));
+  }
+  function nativeFrame(deck, view) {
+    clear();
+    return new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest();
+      x.open('GET', decks[deck]);
+      x.onload = () => {
+        const inject = '<script>window.__msgs = [];' +
+          'window.webkit = { messageHandlers: { presenter: { postMessage: m => window.__msgs.push(JSON.parse(JSON.stringify(m))) } } };' +
+          'window.__presenterView = ' + JSON.stringify(view) + ';<\/script>';
+        // No media is needed here: in the app only the audience view runs
+        // timers, so this view holds the video slide without its clip.
+        const html = x.responseText.replace('<head>', '<head>' + inject);
+        load(URL.createObjectURL(new Blob([html], { type: 'text/html' }))).then(resolve);
+      };
+      x.onerror = () => reject(new Error('cannot read ' + decks[deck]));
+      x.send();
+    });
+  }
+  function key(win, k) {
+    win.document.dispatchEvent(new win.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+  }
+  const at = (win) => win.location.hash;
+  const css = (win, el, prop) => el ? win.getComputedStyle(el)[prop] : 'missing';
+  const active = (win) => win.document.querySelector('body > .slide.active');
+  const notice = (win) => { const s = active(win); return s ? s.querySelector('.ccli-notice') : null; };
+  const lt = (win) => { const s = active(win); return s ? s.querySelector('.lower-third') : null; };
+  const ltOn = (win) => { const el = lt(win); return !!el && el.classList.contains('is-on') && !el.classList.contains('is-out'); };
+  const shown = (win, el) => !!el && css(win, el, 'display') !== 'none' && css(win, el, 'visibility') === 'visible';
+  function overlaps(a, b) {
+    return !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
+  }
+  // The slide's text (every line of the lyrics), not the content box padding.
+  function textRects(win) {
+    const r = [];
+    active(win).querySelectorAll('.content h1, .content .subtitle, .content li').forEach(el => r.push(...el.getClientRects()));
+    return r;
+  }
+
+  async function run() {
+    // ---- CCLI notice --------------------------------------------------
+    let w = await frame('ccli', '', '#1');
+    await sleep(200);
+    let n = notice(w);
+    check('ccli: notice on the first song slide', !!n);
+    check('ccli: shown in the audience view', shown(w, n), css(w, n, 'visibility'));
+    const nr = n.getBoundingClientRect();
+    check('ccli: audience bottom-left, inside the bottom padding', nr.left >= 60 && nr.left <= 70 && nr.bottom <= 720 && nr.top >= 720 - 88, JSON.stringify(nr));
+    check('ccli: audience small', Math.abs(parseFloat(css(w, n, 'fontSize')) - 720 * 0.0135) < 0.6, css(w, n, 'fontSize'));
+    check('ccli: audience low contrast', /rgba\(255, 255, 255, 0\.5/.test(css(w, n, 'color')), css(w, n, 'color'));
+    check('ccli: never over the lyrics', !textRects(w).some(t => overlaps(t, nr)), textRects(w).length);
+    check('ccli: names the song and the licence', /Amazing Grace/.test(n.textContent) && /CCLI License # 1234567/.test(n.textContent), n.textContent);
+    key(w, 'PageDown');
+    check('ccli: no notice on a middle song slide', !notice(w));
+    key(w, 'PageDown');
+    check('ccli: notice on the last song slide', shown(w, notice(w)));
+    key(w, 'PageDown');
+    check('ccli: no notice after the song', !notice(w));
+    key(w, 'Home'); key(w, 'b');
+    check('ccli: black hides it in the audience view', css(w, notice(w), 'visibility') === 'hidden');
+
+    w = await frame('ccli', '?view=lyrics', '#1');
+    await sleep(200);
+    n = notice(w);
+    check('ccli: lyrics view shows it', shown(w, n));
+    check('ccli: lyrics view compact and readable', Math.abs(parseFloat(css(w, n, 'fontSize')) - 720 * 0.016) < 0.6 && /rgba\(255, 255, 255, 0\.9/.test(css(w, n, 'color')), css(w, n, 'fontSize') + ' ' + css(w, n, 'color'));
+    check('ccli: lyrics view never over the lyrics', !textRects(w).some(t => overlaps(t, n.getBoundingClientRect())));
+
+    w = await frame('ccli', '?view=overlay', '#1');
+    await sleep(200);
+    check('ccli: overlay shows it when no lower third is up', shown(w, notice(w)));
+    check('ccli: overlay page stays transparent', css(w, w.document.body, 'backgroundColor') === 'rgba(0, 0, 0, 0)');
+
+    w = await frame('ccli', '?view=notes', '#1');
+    await sleep(200);
+    const plain = w.document.querySelector('#notesBody .ccli-plain');
+    check('ccli: notes view has it as plain text', plain && /Amazing Grace/.test(plain.textContent) && /\nCCLI License # 1234567/.test(plain.textContent), plain && plain.textContent);
+    key(w, 'PageDown');
+    check('ccli: notes view drops it on a slide without one', !w.document.querySelector('#notesBody .ccli-plain'));
+
+    w = await frame('ccli', '?view=service', '#1');
+    await sleep(200);
+    const cards = w.document.querySelectorAll('#servicePanel button');
+    check('ccli: service view cards carry it as plain text', /CCLI License # 1234567/.test((cards[0].querySelector('.ccli') || {}).textContent || '') && !cards[1].querySelector('.ccli') && !!cards[2].querySelector('.ccli') && !cards[3].querySelector('.ccli'));
+
+    w = await frame('plain', '?now=08:00', '#3');
+    await sleep(200);
+    check('no notice: a deck without // ccli: has none anywhere', !w.document.querySelector('.ccli-notice, .ccli-plain, .service-panel .ccli'));
+
+    // ---- Lower third: L ---------------------------------------------------
+    // Browser windows all run timers, and a video slide whose clip has no
+    // frame after 1.5 s moves on; headless virtual time can outrun media
+    // loading. The fixture's video slide is therefore the deck's LAST slide
+    // (no loop), where a timer cannot move the show, so the windows hold.
+    // The long timing checks run in an app view, where only the audience
+    // view runs timers.
+    if (!decks.lt) return;
+    w = await frame('lt', '', '#1');
+    await sleep(100);
+    key(w, 'l');
+    check('L: ignored on a slide with no lower third', at(w) === '#1' && !w.document.querySelector('.lower-third.is-on'));
+    key(w, 'PageDown');
+    check('L: on the video slide', at(w) === '#2', at(w));
+    check('L: lower third not up before its buildIn', !ltOn(w));
+    check('L: CCLI notice shown while no lower third is up', shown(w, notice(w)));
+    key(w, 'L');
+    check('L: shows the lower third at once', ltOn(w));
+    check('L: the CCLI notice steps aside', css(w, notice(w), 'visibility') === 'hidden');
+    key(w, 'l');
+    check('L: again hides it', !ltOn(w) && lt(w).classList.contains('is-out'));
+    check('L: the CCLI notice comes back', shown(w, notice(w)));
+
+    // Two windows: audience and the overlay (the NDI feed) follow each other.
+    // Each window runs the slide's own buildIn/buildOut from when it showed
+    // the slide, and a window opened later would be behind; so these checks
+    // use a deck whose own timing is minutes away (lowerthird-manual.md):
+    // only L moves the lower third, and each step waits for its exact result
+    // in the other window before the next key.
+    const a = await frame('ltm', '', '#2');
+    const o = await frame('ltm', '?view=overlay', '', true);
+    await waitFor(() => at(o) === '#2');
+    check('sync: both start with the lower third down', !ltOn(a) && !ltOn(o));
+    key(a, 'l');
+    await waitFor(() => ltOn(o));
+    check('sync: L in audience shows it on the overlay', ltOn(a) && ltOn(o));
+    check('sync: overlay draws the lower third', shown(o, lt(o)) && css(o, lt(o).querySelector('.lt-bar'), 'display') !== 'none');
+    key(o, 'l');
+    await waitFor(() => !ltOn(a));
+    check('sync: L in the overlay window hides it in audience', !ltOn(a) && !ltOn(o));
+    key(o, 'L');
+    await waitFor(() => ltOn(a));
+    check('sync: and shows it again', ltOn(a) && ltOn(o));
+    key(a, 'b');
+    await waitFor(() => o.document.body.classList.contains('blacked'));
+    check('black wins: audience hides the lower third', ltOn(a) && css(a, lt(a), 'visibility') === 'hidden');
+    check('black wins: overlay hides it and stays transparent', ltOn(o) && css(o, lt(o), 'visibility') === 'hidden' && css(o, o.document.body, 'backgroundColor') === 'rgba(0, 0, 0, 0)');
+    key(a, 'b');
+    await waitFor(() => !o.document.body.classList.contains('blacked'));
+    // A late window joins with the manual state of the slide it lands on.
+    const late = await frame('ltm', '?view=overlay', '', true);
+    await waitFor(() => at(late) === '#2' && ltOn(late));
+    check('sync: a late overlay window joins with the lower third up', ltOn(late), at(late));
+    // Leaving the slide ends the manual state everywhere.
+    key(a, 'PageUp');
+    await waitFor(() => at(o) === '#1' && at(late) === '#1');
+    key(a, 'PageDown');
+    await waitFor(() => at(o) === '#2' && at(late) === '#2');
+    check('sync: after leaving and coming back it is down again (own timing)', !ltOn(a) && !ltOn(o) && !ltOn(late));
+
+    // App views: the slide holds, so the timing rules can be checked.
+    w = await nativeFrame('lt', 'overlay');
+    await sleep(100);
+    w.presenter.apply({ index: 1, black: false, timerStart: Date.now() });
+    key(w, 'l');
+    const req = w.__msgs.filter(m => m.type === 'request').pop();
+    check('app: L posts a request with lowerThird', req && req.lowerThird === true, JSON.stringify(w.__msgs));
+    check('app: the page does not change by itself', !ltOn(w));
+    w.presenter.apply({ index: 1, black: false, timerStart: Date.now(), lowerThird: true });
+    check('app: apply with lowerThird shows it', ltOn(w));
+    await sleep(3300);
+    check('timing: after a manual show, buildIn and buildOut no longer apply', ltOn(w));
+    await sleep(5200);
+    check('timing: still up past buildOut', ltOn(w));
+    w.presenter.apply({ index: 1, lowerThird: false });
+    await sleep(3300);
+    check('timing: after a manual hide, buildIn does not bring it back', !ltOn(w));
+    // A slide change ends the manual state; coming back starts its own timing.
+    w.presenter.apply({ index: 0 });
+    w.presenter.apply({ index: 1 });
+    await sleep(200);
+    check('slide change resets: back on the slide, not up until buildIn', !ltOn(w));
+    await sleep(3100);
+    check('slide change resets: its own buildIn brings it up', ltOn(w));
+    await sleep(5200);
+    check('slide change resets: and its own buildOut takes it down', !ltOn(w) && lt(w).classList.contains('is-out'));
+  }
+
+  run().then(() => {
+    document.getElementById('result').textContent = JSON.stringify(checks);
+  }).catch((err) => {
+    checks.push({ name: 'harness error', ok: false, got: String(err && err.stack || err) });
+    document.getElementById('result').textContent = JSON.stringify(checks);
+  });
+</script>
+</body>
+</html>

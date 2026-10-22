@@ -14,7 +14,7 @@ Compatibility with hub 1214 (the native macOS app): views are chosen with `?view
 | b | Scripture via SWORD/diatheke | 1 | built: `!scripture John 3:16-18 (KJV)`; parser tested; diatheke not installed on dawnredwood |
 | c | PowerPoint/Proclaim keys, clicker-safe; service view for jumping | 1 | built |
 | d | MIDI on slide change (Web MIDI) | 2 | built (browser): `// midi:`; macOS app side posts to Swift, sending there is TODO |
-| e | Lower thirds | 1 (exists) / 2 | Tim's video-slide lower third already works and shows in `view=overlay`; manual trigger designed |
+| e | Lower thirds | 1 (exists) / 2 | built: L shows or hides the current slide's lower third in every window (README "Keys"); lower thirds on non-video slides not yet |
 | f | CSS display variants (lyrics-only for OBS) | 1 | built: `lyrics`, `overlay` |
 | g | Presenter notes view; notes hidden elsewhere | 1 | built |
 | h | Pre/post-service loops; countdown to a clock time | 1 | built: `// cycle`, `// countdown`, `// countdownEnd` |
@@ -84,6 +84,11 @@ The original design follows.
 - Browser support: Chrome and Edge, behind a permission prompt (https://developer.chrome.com/blog/web-midi-permission-prompt); Firefox 108 and later with permission; no Safari (https://caniuse.com/webmidi). It needs a secure context (https://developer.mozilla.org/en-US/docs/Web/API/Navigator/requestMIDIAccess). `file://` behaviour varies, so serve the deck from `http://localhost` (for example `python3 -m http.server`). The macOS app from 1214 could send MIDI natively instead, which would avoid both the Safari gap and the permission prompt.
 
 ### Phase 2: lower thirds (bonus)
+
+As built (branch `review/indclaude-1213-lowerthird-ccli`): L toggles the current slide's lower third by hand in every window (BroadcastChannel `{type: 'lowerthird', on, node}`; a window on another slide ignores it; a late window gets it with the hello answer). It overrides the slide's own timing until the slide changes. In the app it is `request {lowerThird}` / `apply {lowerThird}`, and Swift relaying it is still to do. Lower thirds on non-video slides (a generator change) are not done.
+
+The original note:
+
 
 Tim's lower third already exists on video slides (`// name`, `// title`, `buildIn`, `buildOut`) and shows alone in `view=overlay`. The next step is to allow the same directives on any slide, plus a key (L) that fires or clears it by hand. It would use the same CSS and timing.
 

@@ -433,6 +433,48 @@
   }
   body.has-countdown:not(.view-notes):not(.view-service):not(.view-lyrics) .countdown { display: block; }
 
+  /* CCLI song notice (generate.pl: // ccli: and // song:, first and last
+     slide of a song). In the room it is small and quiet, bottom left inside
+     the slide's 88px bottom padding, which the lyrics never enter (fitContent
+     keeps them above it), and under the lower-third layer. The lower third
+     uses the same corner, so the notice steps aside while one is up. */
+  .ccli-notice {
+    position: absolute;
+    left: var(--slide-left);
+    bottom: 16px;
+    z-index: 5;
+    max-width: 40vw;
+    font-family: system-ui, sans-serif;
+    font-size: 1.35vh !important;
+    line-height: 1.35;
+    color: rgba(255, 255, 255, 0.55);
+    text-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
+    pointer-events: none;
+  }
+  .slide:has(.lower-third.is-on:not(.is-out)) .ccli-notice { visibility: hidden; }
+  /* Lyrics (OBS): a stream needs the notice, so it stays readable but compact. */
+  .view-lyrics .ccli-notice {
+    font-size: 1.6vh !important;
+    color: rgba(255, 255, 255, 0.92);
+    text-shadow: 0 0 2px #000, 0 0 6px rgba(0, 0, 0, 0.9);
+  }
+  /* Notes and service show it as plain text (the notes panel, the service
+     card), not on a slide. */
+  .notes-panel .ccli-plain {
+    margin-top: 1em;
+    padding-top: 0.6em;
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
+    font-size: 0.8em;
+    color: rgba(255, 255, 255, 0.7);
+    white-space: pre-line;
+  }
+  .service-panel .ccli {
+    display: block;
+    font-size: 0.75em;
+    opacity: 0.7;
+    white-space: pre-line;
+  }
+
   /* Lyrics: words only, on a transparent page, for an OBS browser source. */
   html.view-lyrics, body.view-lyrics,
   html.view-overlay, body.view-overlay { background: transparent; }
@@ -766,11 +808,16 @@
         if (playOrder[n] && n !== current) showSlide(n, true);
         if (typeof msg.black === 'boolean' && msg.black !== blacked) setBlack(msg.black, true);
         if (typeof msg.timerStart === 'number') timerStart = msg.timerStart;
+        if (msg.reply && typeof msg.lowerThird === 'boolean') setLowerThird(msg.lowerThird, true);
         // In step now (the answer, or a newer live move): a slower reply to
         // the same hello must not pull this window back.
         pendingHello = null;
         // The answer to this window's hello: it is in step, so MIDI may send.
         if (msg.reply) midiSettle();
+      } else if (msg.type === 'lowerthird') {
+        // Only for a window on the same slide; a slide change resets it anyway.
+        const el = currentLowerThird();
+        if (el && nodeIndex(el.closest('.slide')) === msg.node) setLowerThird(!!msg.on, true);
       } else if (msg.type === 'black') {
         setBlack(!!msg.on, true);
       } else if (msg.type === 'timer') {
@@ -789,7 +836,7 @@
           post({ type: 'midi-claim', since: midiSince });
           if (midiStatusText) post({ type: 'midi-status', text: midiStatusText });
         }
-        post({ type: 'show', reply: true, nonce: msg.nonce, n: current, node: nodeIndex(playOrder[current] && playOrder[current].slide), black: blacked, timerStart: timerStart });
+        post({ type: 'show', reply: true, nonce: msg.nonce, n: current, node: nodeIndex(playOrder[current] && playOrder[current].slide), black: blacked, timerStart: timerStart, lowerThird: lowerThirdOverride });
       }
     };
   }
@@ -820,6 +867,7 @@
     if (typeof patch.index === 'number' && playOrder[patch.index]) showSlide(patch.index);
     if (typeof patch.black === 'boolean' && patch.black !== blacked) setBlack(patch.black);
     if (typeof patch.timerStart === 'number') setTimerStart(patch.timerStart);
+    if (typeof patch.lowerThird === 'boolean') setLowerThird(patch.lowerThird);
   }
 
   // Draws a state pushed by the app. It never posts back, so pushing the
@@ -829,6 +877,8 @@
     if (Number.isInteger(s.index) && playOrder[s.index] && s.index !== current) showSlide(s.index, true);
     if (typeof s.black === 'boolean' && s.black !== blacked) setBlack(s.black, true);
     if (typeof s.timerStart === 'number') timerStart = s.timerStart;
+    // The app relays the operator's L as lowerThird (Swift side: TODO).
+    if (typeof s.lowerThird === 'boolean') setLowerThird(s.lowerThird, true);
     // Swift has moved the show (often on a clicker key the page never saw),
     // so digits typed before then must not turn a later Enter into a jump.
     typed = '';
@@ -957,6 +1007,11 @@
   }
 
   // ---- Notes, status and service order ----------------------------------
+  // A CCLI notice as plain text: its <br> lines become newlines.
+  function noticeText(el) {
+    return [...el.childNodes].map(n => n.nodeName === 'BR' ? '\n' : n.textContent).join('').trim();
+  }
+
   function updateNotes() {
     if (view !== 'notes') return;
     const slide = playOrder[current] && playOrder[current].slide;
@@ -965,6 +1020,13 @@
     const aside = slide.querySelector('.notes');
     if (aside) notesBody.innerHTML = aside.innerHTML.trim();
     else notesBody.innerHTML = '<p class="empty">No notes for this slide.</p>';
+    const notice = slide.querySelector('.ccli-notice');
+    if (notice) {
+      const plain = document.createElement('div');
+      plain.className = 'ccli-plain';
+      plain.textContent = noticeText(notice);
+      notesBody.appendChild(plain);
+    }
     updateNextPreview();
   }
 
@@ -1048,6 +1110,13 @@
         sub.className = 'sub';
         sub.textContent = info.sub;
         button.appendChild(sub);
+      }
+      const notice = item.slide.querySelector('.ccli-notice');
+      if (notice) {
+        const ccli = document.createElement('span');
+        ccli.className = 'ccli';
+        ccli.textContent = noticeText(notice);
+        button.appendChild(ccli);
       }
       button.addEventListener('click', () => {
         goTo(i);
@@ -1264,12 +1333,45 @@
   function clearLowerThird() {
     lowerTimers.forEach(clearTimeout);
     lowerTimers = [];
+    lowerThirdOverride = null;
     document.querySelectorAll('.lower-third').forEach(el => {
       el.style.transition = 'none';
       el.classList.remove('is-on', 'is-out');
       void el.offsetWidth;
       el.style.transition = '';
     });
+  }
+
+  // The operator's L: show or hide the current slide's lower third by hand,
+  // on every window. It cancels that slide's own buildIn/buildOut timing and
+  // lasts until the slide changes; a new slide (or coming back to this one)
+  // starts its own timing again. Black still hides it on the audience view.
+  let lowerThirdOverride = null;
+  function currentLowerThird() {
+    const slide = playOrder[current] && playOrder[current].slide;
+    return slide ? slide.querySelector('.lower-third') : null;
+  }
+  function lowerThirdShowing() {
+    const el = currentLowerThird();
+    return !!el && el.classList.contains('is-on') && !el.classList.contains('is-out');
+  }
+  function setLowerThird(on, fromRemote) {
+    const el = currentLowerThird();
+    if (!el) return;
+    lowerTimers.forEach(clearTimeout);
+    lowerTimers = [];
+    lowerThirdOverride = !!on;
+    if (on) {
+      el.classList.remove('is-out');
+      el.classList.add('is-on');
+    } else if (el.classList.contains('is-on')) {
+      el.classList.add('is-out');
+    }
+    if (!fromRemote) post({ type: 'lowerthird', on: !!on, node: nodeIndex(el.closest('.slide')) });
+  }
+  function toggleLowerThird() {
+    if (!currentLowerThird()) return;
+    requestState({ lowerThird: !lowerThirdShowing() });
   }
 
   function startLowerThird(slide) {
@@ -1472,6 +1574,9 @@
     } else if (k === 'b' || k === 'B' || k === '.') {
       e.preventDefault();
       toggleBlack();
+    } else if (k === 'l' || k === 'L') {
+      e.preventDefault();
+      toggleLowerThird();
     } else if (k === 's' || k === 'S') {
       e.preventDefault();
       toggleService();

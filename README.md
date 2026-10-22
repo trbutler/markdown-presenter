@@ -109,7 +109,13 @@ A song starts in the block containing `// song:` (or the next visible block if i
 
 The notice joins the supplied nonempty fields with ` | `, then adds a separate `CCLI License # <number>` line. Only the title is required; empty optional fields can be kept as `||`, and nothing missing is invented. All notice text is HTML-escaped. Malformed song lines (missing title, missing colon, or more than four fields) warn with the original `file:line`, including inside includes. An invalid licence disables notices and warns. Directives inside speaker notes stay note text and cannot create a notice.
 
-Generated notices use `.ccli-notice` with a small font outside the notes `<aside>`. This change supplies generator markup; final positioning and view styling belong to a later template change. Planning Center importer integration and usage reporting are follow-ups. Tim still needs to supply the actual licence number, approve first-and-last placement, and decide which streaming licence applies to any streamed service.
+Generated notices use `.ccli-notice` outside the notes `<aside>`. How they show:
+
+- Audience: small (1.35 % of the screen height) and low-contrast, bottom left inside the slide's bottom margin, where the lyrics never go, so it never covers them. Black hides it with the slide. While a lower third is up it steps aside, because the lower third uses the same corner.
+- Lyrics (the OBS source): a stream needs the notice, so it stays readable (white with a shadow) but compact.
+- Overlay: shown whenever no lower third is up, hidden while one is.
+- Notes: plain text under the notes. Service: plain text on that slide's card.
+- A deck without `// ccli:` is unchanged. Planning Center importer integration and usage reporting are follow-ups. Tim still needs to supply the actual licence number, approve first-and-last placement, and decide which streaming licence applies to any streamed service.
 
 Pre-service and post-service loops are sections:
 
@@ -170,6 +176,7 @@ The keys are PowerPoint's and Proclaim's, so presentation clickers work.
 - Home, End: first and last slide. A number then Enter jumps to that slide; digits not followed by Enter within 1.5 seconds are forgotten, so a stray digit never turns a later Enter into a jump.
 - B or `.`: black screen. The next Next or Back brings the picture back without moving. On an auto-advancing deck or a cycling section the show keeps moving underneath the black, so the picture comes back at the live point.
 - S: the service order over the slides; Esc closes it.
+- L: show or hide the current slide's lower third (a video slide with `// name:` / `// title:`) by hand, in every window, including the overlay for NDI. It overrides that slide's `buildIn` / `buildOut` until the slide changes; going to another slide, or coming back, starts the slide's own timing again. Black still hides it on the audience view, and the overlay stays transparent while it is down. On a slide without a lower third, L does nothing. In the macOS app L asks Swift with `{type: 'request', lowerThird}` and the page shows it when `presenter.apply` brings `lowerThird` back; relaying that is still to do on the Swift side.
 - F: fullscreen.
 
 In the macOS app the clicker keys (arrows, Page Up/Down, Space, Home, End, B, `.`) are taken by the app before the page sees them; the others above still work through the page.
