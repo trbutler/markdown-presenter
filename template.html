@@ -815,6 +815,11 @@
         if (typeof msg.black === 'boolean' && msg.black !== blacked) setBlack(msg.black, true);
         if (typeof msg.timerStart === 'number') timerStart = msg.timerStart;
         if (msg.reply && typeof msg.lowerThird === 'boolean') setLowerThird(msg.lowerThird, true);
+        // Otherwise run the slide's own timing from when the answering window
+        // started it, not from now: a late overlay (NDI) stays in step.
+        else if (msg.reply && typeof msg.lowerStart === 'number' && msg.lowerStart > 0 && currentLowerThird()) {
+          startLowerThird(playOrder[current].slide, Date.now() - msg.lowerStart);
+        }
         // In step now (the answer, or a newer live move): a slower reply to
         // the same hello must not pull this window back.
         pendingHello = null;
@@ -842,7 +847,7 @@
           post({ type: 'midi-claim', since: midiSince });
           if (midiStatusText) post({ type: 'midi-status', text: midiStatusText });
         }
-        post({ type: 'show', reply: true, nonce: msg.nonce, n: current, node: nodeIndex(playOrder[current] && playOrder[current].slide), black: blacked, timerStart: timerStart, lowerThird: lowerThirdOverride });
+        post({ type: 'show', reply: true, nonce: msg.nonce, n: current, node: nodeIndex(playOrder[current] && playOrder[current].slide), black: blacked, timerStart: timerStart, lowerThird: lowerThirdOverride, lowerStart: lowerStart });
       }
     };
   }
@@ -1335,11 +1340,14 @@
   }
 
   let lowerTimers = [];
+  // When the current slide's own buildIn/buildOut timing started (0: none).
+  let lowerStart = 0;
 
   function clearLowerThird() {
     lowerTimers.forEach(clearTimeout);
     lowerTimers = [];
     lowerThirdOverride = null;
+    lowerStart = 0;
     document.querySelectorAll('.lower-third').forEach(el => {
       el.style.transition = 'none';
       el.classList.remove('is-on', 'is-out');
@@ -1380,18 +1388,23 @@
     requestState({ lowerThird: !lowerThirdShowing() });
   }
 
-  function startLowerThird(slide) {
+  // elapsed: how far into its timing the slide already is (a late window).
+  function startLowerThird(slide, elapsed) {
     clearLowerThird();
     const el = slide.querySelector('.lower-third');
     if (!el) return;
-    const buildIn = Number(el.dataset.buildIn);
-    const buildOut = Number(el.dataset.buildOut);
+    const since = Math.max(0, elapsed || 0);
+    lowerStart = Date.now() - since;
+    const buildIn = Number(el.dataset.buildIn) - since;
+    const buildOut = Number(el.dataset.buildOut) - since;
     const stillHere = () => playOrder[current] && playOrder[current].slide === slide;
-    lowerTimers.push(setTimeout(() => {
+    if (buildIn <= 0) el.classList.add('is-on');
+    else lowerTimers.push(setTimeout(() => {
       if (!stillHere()) return;
       el.classList.add('is-on');
     }, buildIn));
-    lowerTimers.push(setTimeout(() => {
+    if (buildOut <= 0) el.classList.add('is-on', 'is-out');
+    else lowerTimers.push(setTimeout(() => {
       if (!stillHere()) return;
       el.classList.add('is-out');
     }, buildOut));
