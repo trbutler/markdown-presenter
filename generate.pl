@@ -117,6 +117,13 @@ sub parse_slide {
         die "// video needs a file path\n" unless defined $dir{video} && length $dir{video};
         $video = $dir{video};
     }
+    if (!length($video) && !exists $dir{name}) {
+        my ($lowerKey) = grep { exists $dir{$_} } qw(title buildIn buildOut);
+        if (defined $lowerKey) {
+            my $where = defined $dirSource{$lowerKey} ? "$dirSource{$lowerKey}: " : '';
+            warn $where . "Lower third on a still slide needs // name:\n";
+        }
+    }
     my $has = length($kicker) || length($title) || length($bg) || length($video)
         || @bullets || @subtitle;
 
@@ -336,8 +343,10 @@ sub render {
     if ($has_nonvideo_lower_third) {
         # Keep generated pages byte-for-byte stable unless a non-video lower
         # third is requested. Video slides already start these timers.
-        $template =~ s/if \(slide\.dataset\.kind !== 'video'\) clearLowerThird\(\);/\/\/ Lower thirds may also belong to ordinary slides.\n    clearLowerThird();/;
-        $template =~ s/if \(slide\.dataset\.kind === 'video'\) \{\n      startLowerThird\(slide\);/startLowerThird(slide);\n    if (slide.dataset.kind === 'video') {/;
+        $template =~ s/if \(slide\.dataset\.kind !== 'video'\) clearLowerThird\(\);/\/\/ Lower thirds may also belong to ordinary slides.\n    clearLowerThird();/
+            or die "Cannot enable still-slide lower thirds: template reset hook not found\n";
+        $template =~ s/if \(slide\.dataset\.kind === 'video'\) \{\n      startLowerThird\(slide\);/startLowerThird(slide);\n    if (slide.dataset.kind === 'video') {/
+            or die "Cannot enable still-slide lower thirds: template timing hook not found\n";
     }
     $template =~ s/<!-- SLIDES_PLACEHOLDER -->/$slides/;
     $template =~ s|/\* DECK_CONFIG \*/|$json|;
