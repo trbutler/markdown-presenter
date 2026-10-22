@@ -113,3 +113,37 @@ final class ScreenAssignmentTests: XCTestCase {
         XCTAssertEqual(a.resolve(.confidence, among: [laptop, projector, stageTV]), stageTV)
     }
 }
+
+final class NDIRuntimeTests: XCTestCase {
+    func testMissingEntryPointFallsThroughAndClosesHandles() throws {
+        let oldHandle = try XCTUnwrap(UnsafeMutableRawPointer(bitPattern: 1))
+        let goodHandle = try XCTUnwrap(UnsafeMutableRawPointer(bitPattern: 2))
+        let entry = try XCTUnwrap(UnsafeMutableRawPointer(bitPattern: 3))
+        var attempted: [String] = []
+        var closed: [UnsafeMutableRawPointer] = []
+        var runtime: NDIRuntime? = try NDIRuntime.load(searching: ["absent", "old", "good"], openLibrary: { path in
+            attempted.append(path)
+            return path == "old" ? oldHandle : path == "good" ? goodHandle : nil
+        }, findEntry: { $0 == goodHandle ? entry : nil }, closeLibrary: { closed.append($0) })
+        XCTAssertEqual(attempted, ["absent", "old", "good"])
+        XCTAssertEqual(runtime?.path, "good")
+        XCTAssertEqual(runtime?.loadEntryPoint, entry)
+        XCTAssertEqual(closed, [oldHandle])
+        runtime = nil
+        XCTAssertEqual(closed, [oldHandle, goodHandle])
+    }
+
+    func testAllRejectedCandidatesAreReported() throws {
+        let handle = try XCTUnwrap(UnsafeMutableRawPointer(bitPattern: 1))
+        var closed = 0
+        XCTAssertThrowsError(try NDIRuntime.load(searching: ["old", "absent"], openLibrary: { $0 == "old" ? handle : nil },
+                                               findEntry: { _ in nil }, closeLibrary: { _ in closed += 1 })) { error in
+            guard case NDIRuntimeError.noUsableRuntime(let searched, let missing) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertEqual(searched, ["old", "absent"])
+            XCTAssertEqual(missing, ["old"])
+        }
+        XCTAssertEqual(closed, 1)
+    }
+}
