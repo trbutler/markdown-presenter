@@ -14,6 +14,9 @@
   const decks = { ccli: q.get('ccli'), lt: q.get('lt'), ltm: q.get('ltm'), plain: q.get('plain') };
   const checks = [];
   const check = (name, ok, got) => checks.push({ name, ok: !!ok, got: got === undefined ? null : String(got) });
+  // A check whose condition could not be observed this run: reported as a
+  // skip by the .t file, never as a pass.
+  const inconclusive = (name, why) => checks.push({ name, ok: false, inconclusive: true, got: String(why) });
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   // Messages between frames cross the browser process, which virtual time
   // does not wait for: poll in 1 ms steps, so real time can pass for each
@@ -199,11 +202,15 @@
     // The audience frame's timers can run ahead of this page's virtual clock
     // (seen: is-on 1.5 s into a 3 s buildIn), so it can be past
     // buildOut already by the time the late window has joined; then the up
-    // phase cannot be seen, and the out check below still holds both.
+    // phase cannot be seen here, so the check is inconclusive (not a pass).
+    // The normal down -> up transition is checked deterministically below
+    // ('build-in: ...').
     const isOut = (win) => !!lt(win) && lt(win).classList.contains('is-out');
     const up2 = await waitFor(() => ltOn(a2) || isOut(a2), 20000);
     await sleep(50);
-    check('late timing: the audience buildIn brings it up in the late window too', joined2 && up2 && (isOut(a2) ? isOut(late2) : ltOn(a2) && ltOn(late2)), [joined2, up2, ltOn(a2), ltOn(late2), isOut(a2)]);
+    const upName = 'late timing: the audience buildIn brings it up in the late window too';
+    if (joined2 && up2 && isOut(a2)) inconclusive(upName, 'audience already past buildOut; up phase not seen');
+    else check(upName, joined2 && up2 && ltOn(a2) && ltOn(late2), [joined2, up2, ltOn(a2), ltOn(late2), isOut(a2)]);
     const out2 = await waitFor(() => lt(a2).classList.contains('is-out'), 20000);
     await sleep(50);
     check('late timing: the audience buildOut takes it down in the late window too', out2 && !ltOn(a2) && !ltOn(late2) && lt(late2).classList.contains('is-out'), [out2, ltOn(a2), ltOn(late2)]);
@@ -264,6 +271,39 @@
     check('late step: joining after buildIn shows the bar in place, not sliding in', j.ok && j.el.classList.contains('is-on') && !j.el.classList.contains('is-out') && Math.abs(j.x) < 1 && j.op === 1, [j.ok, j.el && j.el.className, j.x, j.op]);
     j = await joinAt(900000 + 5000);
     check('late step: joining after buildOut shows no fading bar', j.ok && j.el.classList.contains('is-out') && j.op < 0.01, [j.ok, j.el && j.el.className, j.x, j.op]);
+
+    // The normal transition: down before buildIn, up after it, in both
+    // windows. A lone audience window's hello gets a reply putting the
+    // slide's own timing (ltm: buildIn 600 s, buildOut 900 s) 20 s
+    // short of buildIn, and an overlay then joins from the audience's own
+    // reply. Frame clocks can run seconds ahead of this page while it waits
+    // on messages (seen: more than 6 s), so the gap is 20 s; buildOut stays
+    // minutes past it, so only buildIn can bring the bar up.
+    {
+      const gap = 20000;
+      const spy3 = new BroadcastChannel('mdp:' + new URL(decks.ltm).pathname);
+      let nonce = null;
+      spy3.onmessage = (e) => { if (e.data && e.data.type === 'hello' && nonce === null) nonce = e.data.nonce; };
+      const ba = await frame('ltm', '', '#2');
+      const got = await waitFor(() => nonce !== null);
+      const start = Date.now() - (600000 - gap);
+      spy3.postMessage({ type: 'show', reply: true, nonce: nonce, n: 1, node: 1, black: false, lowerThird: null, lowerStart: start, from: 'spy' });
+      spy3.postMessage({ type: 'black', on: true, from: 'spy' });
+      const seen = await waitFor(() => ba.document.body.classList.contains('blacked'));
+      spy3.postMessage({ type: 'black', on: false, from: 'spy' });
+      await waitFor(() => !ba.document.body.classList.contains('blacked'));
+      spy3.close();
+      const bo = await frame('ltm', '?view=overlay', '', true);
+      const joined = await waitFor(() => at(bo) === '#2');
+      const down = (win) => !!lt(win) && !lt(win).classList.contains('is-on') && !lt(win).classList.contains('is-out');
+      // got: how far each window's own clock is short of buildIn.
+      const left = (win) => start + 600000 - win.Date.now();
+      check('build-in: both windows are down before buildIn', got && seen && joined && down(ba) && down(bo), [got, seen, joined, lt(ba) && lt(ba).className, lt(bo) && lt(bo).className, left(ba), left(bo)]);
+      // Wait until both windows' own clocks are 2 s past buildIn, so a
+      // broken buildIn fails here instead of spending the virtual time budget.
+      const up = await waitFor(() => (ltOn(ba) && ltOn(bo)) || (left(ba) < -2000 && left(bo) < -2000), 100000) && ltOn(ba) && ltOn(bo);
+      check('build-in: buildIn brings it up in both windows', up && ltOn(ba) && ltOn(bo), [up, lt(ba) && lt(ba).className, lt(bo) && lt(bo).className, left(ba), left(bo)]);
+    }
 
     // App views: the slide holds, so the timing rules can be checked.
     w = await nativeFrame('lt', 'overlay');

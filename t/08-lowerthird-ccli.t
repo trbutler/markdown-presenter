@@ -69,6 +69,11 @@ if (defined $json) {
 my $checks = eval { decode_json(Encode::encode('UTF-8', $json)) } || [];
 ok(scalar @$checks > 20, 'ran the lower-third and CCLI checks (' . scalar(@$checks) . ')');
 foreach my $c (@$checks) {
+    # A check the harness could not observe this run is a skip, not a pass.
+    if ($c->{inconclusive}) {
+        SKIP: { skip "browser: $c->{name}: inconclusive (" . ($c->{got} // '') . ')', 1 }
+        next;
+    }
     ok($c->{ok}, "browser: $c->{name}") or diag "got: " . ($c->{got} // '');
 }
 
