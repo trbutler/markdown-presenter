@@ -7,29 +7,55 @@ import PresenterCore
 struct ViewPreferences: View {
     let store: ViewStore
     @State private var selection: UUID? = nil
+    @State private var showsServerSheet = false
 
     init(store: ViewStore) { self.store = store }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ViewListToolbar(store: store, selection: $selection)
-            HStack(alignment: .top) {
+        HSplitView {
+            VStack(spacing: 0) {
                 List(selection: $selection) {
                     ForEach(store.list.views) { config in
-                        ViewListRow(name: config.name, kind: config.kind.title).tag(config.id)
+                        ViewListRow(config: config).tag(config.id)
+                            .contextMenu { rowMenu(config) }
                     }.onMove { store.move($0, to: $1) }
-                }.frame(minWidth: 200, maxWidth: 260)
+                }
+                .listStyle(.sidebar)
+                .onDeleteCommand(perform: removeSelection)
+                Divider()
+                ViewListBar(store: store, selection: $selection, showsServerSheet: $showsServerSheet,
+                            remove: removeSelection)
+            }
+            .frame(minWidth: 200, idealWidth: 230, maxWidth: 300)
+            VStack(alignment: .leading, spacing: 8) {
                 if let config = store.list.views.first(where: { $0.id == selection }) {
                     ViewEditor(store: store, config: config).id(config.id)
                 } else {
-                    Text("Select a view to choose its displays and NDI output.").foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    ContentUnavailableView("No View Selected", systemImage: "display",
+                        description: Text("Select a view to choose its displays and NDI output."))
                 }
+                if let error = store.error { Text(error).foregroundStyle(.red).textSelection(.enabled).padding(.horizontal) }
             }
-            if let error = store.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+            .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding()
         .frame(minWidth: 780, minHeight: 540)
+        .sheet(isPresented: $showsServerSheet) { KeyrussoServerSheet(store: store) }
+    }
+
+    private func removeSelection() {
+        guard let id = selection else { return }
+        store.remove(id)
+        selection = nil
+    }
+
+    @ViewBuilder private func rowMenu(_ config: ViewConfig) -> some View {
+        let index = store.list.views.firstIndex { $0.id == config.id }
+        Button("Move Up") { if let index { store.move(IndexSet(integer: index), to: index - 1) } }
+            .disabled(index == nil || index == 0)
+        Button("Move Down") { if let index { store.move(IndexSet(integer: index), to: index + 2) } }
+            .disabled(index == nil || index == store.list.views.count - 1)
+        Divider()
+        Button("Remove", role: .destructive) { store.remove(config.id); if selection == config.id { selection = nil } }
     }
 }
 
@@ -82,38 +108,42 @@ private struct ViewEditor: View {
     }
 }
 
+/// The source-list footer: "+" and "-" at the bottom, as in Finder or System Settings.
 @MainActor
-private struct ViewListToolbar: View {
+private struct ViewListBar: View {
     let store: ViewStore
     @Binding var selection: UUID?
-    private var selectedIndex: Int? { store.list.views.firstIndex { $0.id == selection } }
+    @Binding var showsServerSheet: Bool
+    let remove: () -> Void
+
     var body: some View {
-        HStack {
-            Text("Views").font(.title2)
-            Spacer()
-            Menu {
-                ForEach(ViewKind.allCases, id: \.self) { kind in
-                    Button(kind.title) { selection = store.add(kind) }
-                }
-            } label: { Image(systemName: "plus") }
-            .help("Add a view")
-            Button { if let selection = selection { store.remove(selection); self.selection = nil } } label: { Image(systemName: "minus") }
+        HStack(spacing: 2) {
+            AddViewMenu(store: store, selection: $selection, showsServerSheet: $showsServerSheet)
+            Button(action: remove) { Label("Remove View", systemImage: "minus") }
                 .disabled(selection == nil)
-            Button("Up") { if let index = selectedIndex { store.move(IndexSet(integer: index), to: index - 1) } }
-                .disabled((selectedIndex ?? 0) == 0)
-            Button("Down") { if let index = selectedIndex { store.move(IndexSet(integer: index), to: index + 2) } }
-                .disabled(selectedIndex == nil || selectedIndex == store.list.views.count - 1)
+                .help("Remove the selected view")
+            Spacer()
         }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
     }
 }
 
 private struct ViewListRow: View {
-    let name: String
-    let kind: String
+    let config: ViewConfig
+
+    private var detail: String {
+        guard config.kind == .custom, let text = config.customURL, let url = URL(string: text), !url.isFileURL,
+              let host = url.host else { return config.kind.title }
+        return host + url.path
+    }
+
     var body: some View {
         VStack(alignment: .leading) {
-            Text(name)
-            Text(kind).font(.caption).foregroundStyle(.secondary)
+            Text(config.name)
+            Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
     }
 }

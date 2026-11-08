@@ -8,10 +8,13 @@ import PresenterCore
 @Observable
 final class ViewStore {
     private static let defaultsKey = "presenterViewList.v1"
+    private static let keyrussoKey = "keyrussoServer.v1"
     let deckURL: URL
     private(set) var list: ViewList
     var displays: [DisplayInfo] = []
     var error: String?
+    private(set) var keyrussoBase: URL = KeyrussoPreset.defaultBase
+    private(set) var isImportingMap = false
     var outputStatus: [UUID: String] = [:]
     @ObservationIgnored var onChange: (() -> Void)?
 
@@ -27,7 +30,51 @@ final class ViewStore {
                 self.error = "Saved views could not be loaded; the saved data is retained. \(error.localizedDescription)"
             }
         }
+        if let text = UserDefaults.standard.string(forKey: Self.keyrussoKey),
+           let saved = try? KeyrussoServer.normalizedBase(text) {
+            keyrussoBase = saved
+        }
         displays = NSScreen.displayInfos
+    }
+
+    /// Adds one Keyrusso screen as a custom view pointing at the saved server.
+    func addKeyrusso(_ preset: KeyrussoPreset) -> UUID? {
+        do {
+            let view = try preset.view(base: keyrussoBase)
+            var candidate = list
+            try candidate.add([view], deckURL: deckURL)
+            try commit(candidate)
+            return view.id
+        } catch { self.error = error.localizedDescription; return nil }
+    }
+
+    func setKeyrussoServer(_ text: String) -> Bool {
+        do {
+            keyrussoBase = try KeyrussoServer.normalizedBase(text)
+            UserDefaults.standard.set(keyrussoBase.absoluteString, forKey: Self.keyrussoKey)
+            error = nil
+            return true
+        } catch { self.error = error.localizedDescription; return false }
+    }
+
+    /// Reads the server's display map and adds one view per entry, placed on
+    /// Display N (in the order the app lists displays) and/or an NDI source.
+    func importKeyrussoMap() async {
+        guard !isImportingMap else { return }
+        isImportingMap = true
+        defer { isImportingMap = false }
+        do {
+            var request = URLRequest(url: try KeyrussoServer.displayMapURL(base: keyrussoBase))
+            request.timeoutInterval = 10
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                throw ViewConfigError.invalid("The Keyrusso server did not answer with a display map")
+            }
+            let views = try KeyrussoDisplayMap.decode(data).views(displayIDs: displays.map(\.id))
+            var candidate = list
+            try candidate.add(views, deckURL: deckURL)
+            try commit(candidate)
+        } catch { self.error = error.localizedDescription }
     }
 
     func add(_ kind: ViewKind) -> UUID? {
