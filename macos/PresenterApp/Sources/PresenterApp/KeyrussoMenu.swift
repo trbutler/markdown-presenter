@@ -57,8 +57,8 @@ struct KeyrussoServerSheet: View {
         .formStyle(.grouped)
         .frame(minWidth: 380)
         .toolbar {
-            ToolbarItem(cancellationAction: .automatic) { Button("Cancel", role: .cancel) { dismiss() } }
-            ToolbarItem(confirmationAction: .automatic) {
+            ToolbarItem(placement: .cancellationAction) { Button("Cancel", role: .cancel) { dismiss() } }
+            ToolbarItem(placement: .confirmationAction) {
                 Button("Save") { if store.setKeyrussoServer(text) { dismiss() } }
                     .keyboardShortcut(.defaultAction)
             }

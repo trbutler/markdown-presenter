@@ -126,14 +126,3 @@ public struct KeyrussoDisplayMap: Decodable, Equatable, Sendable {
         }
     }
 }
-
-extension ViewList {
-    /// Adds the views as a group. Either all are added or none: a bad URL or a
-    /// duplicate NDI name leaves the list as it was.
-    public mutating func add(_ views: [ViewConfig], deckURL: URL) throws {
-        var candidate = self
-        candidate.views.append(contentsOf: views)
-        try candidate.validate(deckURL: deckURL)
-        self = candidate
-    }
-}

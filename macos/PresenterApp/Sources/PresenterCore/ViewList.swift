@@ -50,6 +50,15 @@ public struct ViewList: Codable, Equatable, Sendable {
         return view.id
     }
 
+    /// Adds the views as a group. Either all are added or none: a bad URL or a
+    /// duplicate NDI name leaves the list as it was.
+    public mutating func add(_ newViews: [ViewConfig], deckURL: URL) throws {
+        var candidate = self
+        candidate.views.append(contentsOf: newViews)
+        try candidate.validate(deckURL: deckURL)
+        self = candidate
+    }
+
     public mutating func replace(_ view: ViewConfig, deckURL: URL) throws {
         guard let index = views.firstIndex(where: { $0.id == view.id }) else { throw ViewConfigError.invalid("View no longer exists") }
         var candidate = self
